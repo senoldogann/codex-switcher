@@ -13,6 +13,24 @@ final class SessionTokenParser {
         iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
 
+    private func parseDate(_ ts: String) -> Date? {
+        // "2026-03-31T02:50:56.019Z" formatını dene
+        if let d = iso8601.date(from: ts) { return d }
+        // Fallback: fractional seconds olmadan
+        let f2 = ISO8601DateFormatter()
+        f2.formatOptions = [.withInternetDateTime]
+        if let d = f2.date(from: ts) { return d }
+        // Son çare: DateFormatter
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "UTC")
+        for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ"] {
+            df.dateFormat = fmt
+            if let d = df.date(from: ts) { return d }
+        }
+        return nil
+    }
+
     func calculate(profiles: [Profile], history: [SwitchEvent]) -> [UUID: AccountTokenUsage] {
         let allSessions = collectAllSessions()
         guard !allSessions.isEmpty else { return [:] }
@@ -67,15 +85,13 @@ final class SessionTokenParser {
     }
 
     private func sessionStartDate(at url: URL) -> Date? {
-        guard let handle = FileHandle(forReadingAtPath: url.path) else { return nil }
-        defer { try? handle.close() }
-        let data = handle.readData(ofLength: 2048)
-        guard let text = String(data: data, encoding: .utf8) else { return nil }
-        let firstLine = text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? ""
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let firstLine = content.components(separatedBy: "\n")
+            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
         guard let jsonData = firstLine.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
               let ts = json["timestamp"] as? String else { return nil }
-        return iso8601.date(from: ts)
+        return parseDate(ts)
     }
 
     private func finalTokenUsage(at url: URL) -> AccountTokenUsage {

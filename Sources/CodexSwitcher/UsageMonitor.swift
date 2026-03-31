@@ -4,6 +4,7 @@ import Foundation
 @preconcurrency final class UsageMonitor: @unchecked Sendable {
 
     var onRateLimit: (() -> Void)?
+    var onTokenUpdate: (() -> Void)?
 
     private var sessionsDirSource: DispatchSourceFileSystemObject?
     private var fileWatchers: [String: DispatchSourceFileSystemObject] = [:]
@@ -119,10 +120,15 @@ import Foundation
 
         guard let text = String(data: newData, encoding: .utf8) else { return }
 
+        var hasTokenUpdate = false
         for line in text.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
             checkForRateLimit(in: trimmed)
+            if trimmed.contains("\"token_count\"") { hasTokenUpdate = true }
+        }
+        if hasTokenUpdate {
+            DispatchQueue.main.async { [weak self] in self?.onTokenUpdate?() }
         }
     }
 

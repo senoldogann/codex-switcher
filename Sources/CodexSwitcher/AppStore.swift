@@ -49,6 +49,9 @@ final class AppStore: ObservableObject {
         usageMonitor.onRateLimit = { [weak self] in
             Task { @MainActor in self?.handleRateLimitDetected() }
         }
+        usageMonitor.onTokenUpdate = { [weak self] in
+            self?.refreshTokenUsage()
+        }
         usageMonitor.start()
         startUsagePolling()
         startRateLimitPolling()
@@ -98,18 +101,14 @@ final class AppStore: ObservableObject {
     func refreshTokenUsage() {
         let profiles = self.profiles
         let history  = self.switchHistory
-        Task { @MainActor in
-            let usage = await withCheckedContinuation { cont in
-                DispatchQueue.global(qos: .utility).async {
-                    let result = SessionTokenParser().calculate(profiles: profiles, history: history)
-                    cont.resume(returning: result)
-                }
-            }
-            self.tokenUsage = usage
+        let parser   = self.tokenParser
+        DispatchQueue.global(qos: .utility).async {
+            let result = parser.calculate(profiles: profiles, history: history)
+            DispatchQueue.main.async { self.tokenUsage = result }
         }
     }
 
-    func tokenUsage(for profile: Profile) -> AccountTokenUsage? {
+    func getTokenUsage(for profile: Profile) -> AccountTokenUsage? {
         tokenUsage[profile.id]
     }
 

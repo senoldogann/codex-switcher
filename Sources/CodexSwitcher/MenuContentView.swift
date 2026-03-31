@@ -111,7 +111,7 @@ struct MenuContentView: View {
                     }
 
                     // Token usage
-                    if let usage = store.tokenUsage(for: profile), usage.totalTokens > 0 {
+                    if let usage = store.getTokenUsage(for: profile), usage.totalTokens > 0 {
                         tokenUsageRow(usage)
                     }
                 }
