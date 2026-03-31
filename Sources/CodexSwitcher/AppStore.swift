@@ -253,12 +253,19 @@ final class AppStore: ObservableObject {
         guard !codexApps.isEmpty else { return }
 
         for app in codexApps {
-            // forceTerminate: dialog göstermeden anında kapat
-            app.forceTerminate()
+            // Önce graceful terminate dene (aktif stream'in bitmesine fırsat ver)
+            app.terminate()
         }
 
-        // 2 saniye bekle → bundle ID ile yeniden aç (dock'ta görünmez)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // 3 saniye bekle — uygulama kapandıysa devam et, kapanmadıysa force
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            for app in codexApps where app.isTerminated == false {
+                app.forceTerminate()
+            }
+        }
+
+        // 4 saniye bekle → bundle ID ile yeniden aç (dock'ta görünmez)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             NSWorkspace.shared.open(
                 [],
                 withAppBundleIdentifier: "com.openai.codex",
