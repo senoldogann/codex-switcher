@@ -167,8 +167,9 @@ final class AppStore: ObservableObject {
         let profiles = self.profiles
         let history  = self.switchHistory
         let parser   = self.tokenParser
+        let activeProfileId = self.activeProfile?.id
         DispatchQueue.global(qos: .utility).async {
-            let result = parser.calculate(profiles: profiles, history: history)
+            let result = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 // Verify profiles list hasn't changed dramatically

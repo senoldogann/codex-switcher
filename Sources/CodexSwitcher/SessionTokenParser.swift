@@ -42,18 +42,26 @@ final class SessionTokenParser: @unchecked Sendable {
 
     // MARK: - Public
 
-    func calculate(profiles: [Profile], history: [SwitchEvent]) -> [UUID: AccountTokenUsage] {
+    func calculate(profiles: [Profile], history: [SwitchEvent], activeProfileId: UUID? = nil) -> [UUID: AccountTokenUsage] {
         // 1. Disk cache'den kaydedilmiş usage'ları yükle
         let persisted = loadPersistedUsage()
 
-        // 2. Sadece değişen session dosyalarını parse et
-        let freshUsage = parseChangedSessions()
+        // 2. Sadece değişen session dosyalarını parse et (mod zamanlarıyla birlikte)
+        let (freshUsage, freshModTimes) = parseChangedSessionsWithModTimes()
 
         // 3. Persist edilmiş + fresh birleştir
         let merged = mergeUsage(persisted, freshUsage)
 
         // 4. Session attribution (hangi session hangi hesaba ait)
-        let attributed = attributeToProfiles(usage: merged, profiles: profiles, history: history)
+        // Mevcut mod zamanlarını persisted + fresh birleştir
+        let allModTimes = mergeModTimes(loadFileModTimes(), freshModTimes)
+        let attributed = attributeToProfiles(
+            usage: merged,
+            modTimes: allModTimes,
+            profiles: profiles,
+            history: history,
+            activeProfileId: activeProfileId
+        )
 
         // 5. Sonucu diske kaydet
         savePersistedUsage(merged)
@@ -63,8 +71,8 @@ final class SessionTokenParser: @unchecked Sendable {
 
     // MARK: - Change Detection
 
-    /// Sadece son parse'den sonra değişen session dosyalarını bul
-    private func parseChangedSessions() -> [String: AccountTokenUsage] {
+    /// Sadece son parse'den sonra değişen session dosyalarını bul; mod zamanlarını da döner.
+    private func parseChangedSessionsWithModTimes() -> ([String: AccountTokenUsage], [String: Date]) {
         let prevModTimes = loadFileModTimes()
         var newModTimes: [String: Date] = prevModTimes // start with existing cache
         var changed: [String: AccountTokenUsage] = [:]
@@ -72,7 +80,7 @@ final class SessionTokenParser: @unchecked Sendable {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: sessionsDir,
                                               includingPropertiesForKeys: [.contentModificationDateKey],
-                                              options: [.skipsHiddenFiles]) else { return [:] }
+                                              options: [.skipsHiddenFiles]) else { return ([:], [:]) }
 
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
@@ -96,7 +104,13 @@ final class SessionTokenParser: @unchecked Sendable {
         }
 
         saveFileModTimes(newModTimes)
-        return changed
+        return (changed, newModTimes)
+    }
+
+    private func mergeModTimes(_ a: [String: Date], _ b: [String: Date]) -> [String: Date] {
+        var merged = a
+        for (key, value) in b { merged[key] = value }
+        return merged
     }
 
     // MARK: - File Modification Time Cache
@@ -140,8 +154,11 @@ final class SessionTokenParser: @unchecked Sendable {
 
     // MARK: - Attribution
 
-    private func attributeToProfiles(usage: [String: AccountTokenUsage], profiles: [Profile], history: [SwitchEvent]) -> [UUID: AccountTokenUsage] {
+    private func attributeToProfiles(usage: [String: AccountTokenUsage], modTimes: [String: Date], profiles: [Profile], history: [SwitchEvent], activeProfileId: UUID? = nil) -> [UUID: AccountTokenUsage] {
         guard !usage.isEmpty else { return [:] }
+
+        // Last switch timestamp — sessions modified after this are live under the current account
+        let lastSwitchTime = history.max(by: { $0.timestamp < $1.timestamp })?.timestamp
 
         if history.isEmpty {
             guard let active = profiles
@@ -152,12 +169,24 @@ final class SessionTokenParser: @unchecked Sendable {
             return [:]
         }
 
-        // Her session'ın başlangıç tarihini al, hangi hesabın aktif olduğunu bul
         var result: [UUID: AccountTokenUsage] = [:]
         for (sessionPath, sessionUsage) in usage {
-            let sessionDate = sessionStartDateFromPath(sessionPath) ?? Date()
-            let activeProfile = findActiveProfile(at: sessionDate, profiles: profiles, history: history)
-            guard let profileId = activeProfile else { continue }
+            let profileId: UUID?
+
+            // If the session file was modified after the last account switch and we know
+            // who is active now, attribute it to the current account — the session is
+            // still live and accumulating tokens under the current login.
+            if let activeProfileId = activeProfileId,
+               let lastSwitch = lastSwitchTime,
+               let modDate = modTimes[sessionPath],
+               modDate > lastSwitch {
+                profileId = activeProfileId
+            } else {
+                let sessionDate = sessionStartDateFromPath(sessionPath) ?? Date()
+                profileId = findActiveProfile(at: sessionDate, profiles: profiles, history: history)
+            }
+
+            guard let profileId = profileId else { continue }
             result[profileId, default: AccountTokenUsage()] = result[profileId, default: AccountTokenUsage()] + sessionUsage
         }
         return result
