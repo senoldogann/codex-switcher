@@ -36,6 +36,7 @@ final class AppStore: ObservableObject {
     private var authWatcher: DispatchSourceFileSystemObject?
     private var authWatcherFd: Int32 = -1
     private var lastAutoSwitchDate: Date?
+    private var lastAuthWriteDate: Date?
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -43,6 +44,10 @@ final class AppStore: ObservableObject {
 
     private init() {
         profileManager.bootstrap()
+        let recoveryResult = profileManager.verifyAndRecoverActiveAuth()
+        if recoveryResult == .unrecoverable {
+            // All profiles will show as stale; user needs to re-login
+        }
         loadProfiles()
         switchHistory = historyStore.load()
         requestNotificationPermission()
@@ -231,24 +236,45 @@ final class AppStore: ObservableObject {
         switchHistory = historyStore.load()
 
         do {
-            try profileManager.activate(profile: candidate)
-            var config = profileManager.loadConfig()
-            if let i = config.profiles.firstIndex(where: { $0.id == candidate.id }) {
-                config.profiles[i].activatedAt = Date()
+            lastAuthWriteDate = Date() // debounce: prevent authFileChanged from firing
+            let verifyResult = try profileManager.activate(profile: candidate)
+
+            switch verifyResult {
+            case .verified:
+                finalizeActivation(candidate, reason: reason)
+            case .failed:
+                // One retry: re-read file (in case of race with external writer)
+                let retryResult = profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
+                switch retryResult {
+                case .verified:
+                    finalizeActivation(candidate, reason: reason)
+                case .failed:
+                    sendNotification(
+                        title: L("Geçiş başarısız", "Switch failed"),
+                        body: L("Hesap doğrulanamadı. Lütfen tekrar deneyin.", "Account verification failed. Please try again.")
+                    )
+                }
             }
-            config.activeProfileId = candidate.id
-            profileManager.saveConfig(config)
-            activeProfile = config.profiles.first { $0.id == candidate.id }
-            profiles = config.profiles
-            allExhausted = false
-            activeTurns = 0
-            notifyProfileChanged()
-            sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
-            Task { await fetchAllRateLimits() }
-            restartCodexIfRunning()
         } catch {
             sendNotification(title: L("Geçiş başarısız", "Switch failed"), body: error.localizedDescription)
         }
+    }
+
+    private func finalizeActivation(_ candidate: Profile, reason: String) {
+        var config = profileManager.loadConfig()
+        if let i = config.profiles.firstIndex(where: { $0.id == candidate.id }) {
+            config.profiles[i].activatedAt = Date()
+        }
+        config.activeProfileId = candidate.id
+        profileManager.saveConfig(config)
+        activeProfile = config.profiles.first { $0.id == candidate.id }
+        profiles = config.profiles
+        allExhausted = false
+        activeTurns = 0
+        notifyProfileChanged()
+        sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
+        Task { await fetchAllRateLimits() }
+        restartCodexIfRunning()
     }
 
     // MARK: - Codex Restart
@@ -437,12 +463,29 @@ final class AppStore: ObservableObject {
     }
 
     private func authFileChanged() {
-        guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tokens = dict["tokens"] as? [String: Any],
-              let access = tokens["access_token"] as? String else { return }
-        pendingProfileEmail = profileManager.extractEmail(from: access) ?? "bilinmeyen"
-        addingStep = .confirmProfile
+        // Debounce: ignore events within 500ms of our own write
+        if let last = lastAuthWriteDate, Date().timeIntervalSince(last) < 0.5 { return }
+
+        if isAddingAccount {
+            // Existing add-account flow
+            guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tokens = dict["tokens"] as? [String: Any],
+                  let access = tokens["access_token"] as? String else { return }
+            pendingProfileEmail = profileManager.extractEmail(from: access) ?? "bilinmeyen"
+            addingStep = .confirmProfile
+        } else {
+            // External modification detected — verify
+            Task {
+                let result = profileManager.verifyAndRecoverActiveAuth()
+                if result == .unrecoverable {
+                    sendNotification(
+                        title: L("Auth sorunu", "Auth issue"),
+                        body: L("Auth dosyası bozuldu. Hesapları yeniden giriş yapmanız gerekebilir.", "Auth file corrupted. You may need to re-login to your accounts.")
+                    )
+                }
+            }
+        }
     }
 
     private func stopAuthWatcher() { authWatcher?.cancel(); authWatcher = nil }
