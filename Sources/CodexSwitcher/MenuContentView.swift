@@ -1,10 +1,12 @@
 import SwiftUI
 
+enum NavScreen: Hashable { case main, history, addAccount }
+
 struct MenuContentView: View {
     @EnvironmentObject var store: AppStore
     @State private var hoveredId: UUID? = nil
     @State private var appeared = false
-    @State private var showHistory = false
+    @State private var screen: NavScreen = .main
 
     @AppStorage("emailsBlurred") private var emailsBlurred: Bool = false
     @AppStorage("isDarkMode")    private var isDarkMode: Bool = true
@@ -16,6 +18,59 @@ struct MenuContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            navHeader
+            switch screen {
+            case .main:        mainContent
+            case .history:     historyContent
+            case .addAccount:  addAccountContent
+            }
+            if screen == .main { footerBar }
+        }
+        .background(.ultraThinMaterial)
+        .background(scheme == .dark ? Color.black.opacity(0.35) : Color.white.opacity(0.15))
+        .scaleEffect(appeared ? 1 : 0.92)
+        .opacity(appeared ? 1 : 0)
+        .preferredColorScheme(isDarkMode ? .dark : .light)
+        .onAppear {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) { appeared = true }
+        }
+        .onChange(of: isDarkMode) { _, _ in
+            NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+        }
+    }
+
+    // MARK: - Nav Header
+
+    private var navHeader: some View {
+        Group {
+            if screen != .main {
+                HStack {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { screen = .main }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(Str.back)
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(gw.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                Divider().background(gw.opacity(0.06))
+            }
+        }
+    }
+
+    // MARK: - Main Content
+
+    private var mainContent: some View {
+        Group {
             if store.profiles.isEmpty {
                 emptyState
             } else {
@@ -29,19 +84,36 @@ struct MenuContentView: View {
                 }
                 .frame(maxHeight: 420)
             }
-            footerBar
         }
-        .background(.ultraThinMaterial)
-        .background(scheme == .dark ? Color.black.opacity(0.35) : Color.white.opacity(0.15))
-        .scaleEffect(appeared ? 1 : 0.92)
-        .opacity(appeared ? 1 : 0)
-        .preferredColorScheme(isDarkMode ? .dark : .light)
-        .onAppear {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) { appeared = true }
+    }
+
+    // MARK: - History Content
+
+    private var historyContent: some View {
+        Group {
+            if store.switchHistory.isEmpty {
+                Text(Str.noHistory)
+                    .font(.system(size: 12))
+                    .foregroundStyle(gw.opacity(0.35))
+                    .padding(40)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.switchHistory.reversed()) { event in
+                            historyRow(event)
+                            Divider().background(gw.opacity(0.05))
+                        }
+                    }
+                }
+                .frame(maxHeight: 420)
+            }
         }
-        .onChange(of: isDarkMode) { _, _ in
-            NotificationCenter.default.post(name: .appearanceChanged, object: nil)
-        }
+    }
+
+    // MARK: - Add Account Content
+
+    private var addAccountContent: some View {
+        AddAccountInlineView().environmentObject(store)
     }
 
     // MARK: - Empty
@@ -65,6 +137,22 @@ struct MenuContentView: View {
             .padding(.leading, 60)
     }
 
+    private func healthDot(for profile: Profile) -> some View {
+        let color: Color = {
+            if store.staleProfileIds.contains(profile.id) {
+                return .yellow
+            }
+            if store.rateLimits[profile.id] != nil {
+                return .green
+            }
+            return .gray
+        }()
+
+        return Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+    }
+
     // MARK: - Profile Row
 
     private func profileRow(_ profile: Profile) -> some View {
@@ -76,6 +164,7 @@ struct MenuContentView: View {
         } label: {
             HStack(alignment: .center, spacing: 12) {
                 codexAvatar(size: 36, active: isActive)
+                healthDot(for: profile)
 
                 VStack(alignment: .leading, spacing: 3) {
                     // Name row
@@ -243,48 +332,7 @@ struct MenuContentView: View {
         return "\(n)"
     }
 
-    // MARK: - History Sheet
-
-    private var historySheet: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(Str.history)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(gw.opacity(0.8))
-                Spacer()
-                Button { showHistory = false } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(gw.opacity(0.3))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider().background(gw.opacity(0.07))
-
-            if store.switchHistory.isEmpty {
-                Text(Str.noHistory)
-                    .font(.system(size: 12))
-                    .foregroundStyle(gw.opacity(0.35))
-                    .padding(30)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.switchHistory.reversed()) { event in
-                            historyRow(event)
-                            Divider().background(gw.opacity(0.05))
-                        }
-                    }
-                }
-                .frame(maxHeight: 300)
-            }
-        }
-        .background(.ultraThinMaterial)
-        .background(scheme == .dark ? Color.black.opacity(0.35) : Color.white.opacity(0.15))
-        .preferredColorScheme(isDarkMode ? .dark : .light)
-    }
+    // MARK: - History Row
 
     private func historyRow(_ event: SwitchEvent) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -353,18 +401,21 @@ struct MenuContentView: View {
         VStack(spacing: 0) {
             Divider().background(gw.opacity(0.06))
             HStack(spacing: 0) {
-                footerBtn("plus", Str.addAccount) { store.openAddAccountWindow() }
+                footerBtn("plus", Str.addAccount) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .addAccount }
+                }
                     .disabled(store.isAddingAccount)
                 thinDivider
                 footerBtn("arrow.triangle.2.circlepath", Str.switchNow) { store.switchToNext() }
                     .disabled(store.profiles.count < 2)
                 thinDivider
-                footerBtn("clock.arrow.trianglehead.counterclockwise.rotate.90", Str.history) { showHistory = true }
+                footerBtn("clock.arrow.trianglehead.counterclockwise.rotate.90", Str.history) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .history }
+                }
                 thinDivider
                 footerBtn("power", Str.quit) { NSApplication.shared.terminate(nil) }
             }
             .frame(height: 44)
-            .sheet(isPresented: $showHistory) { historySheet }
 
             settingsBar
         }
