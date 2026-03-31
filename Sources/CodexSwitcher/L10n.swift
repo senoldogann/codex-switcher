@@ -40,6 +40,7 @@ enum Str {
                                         "Sign in with your account in the browser.\nWill continue automatically when done.") }
     static var renameTitle:  String { L("Hesap Adını Değiştir", "Rename Account") }
     static var allExhausted: String { L("Tüm hesaplar doldu!", "All accounts exhausted!") }
+    static var switchAnyway: String { L("Yine de geç", "Switch anyway") }
     static var lastKnown:    String { L("son",                 "last") }
     static var unknownUsage: String { L("kullanım bilinmiyor", "usage unknown") }
     static var resets:       String { L("Sıfırlanma",         "Resets") }
@@ -52,4 +53,5 @@ enum Str {
     static var hideEmail:    String { L("Gizle",              "Hide") }
     static var showEmail:    String { L("Göster",             "Show") }
     static var langAuto:     String { L("Oto",                "Auto") }
+    static var back:         String { L("Geri",              "Back") }
 }

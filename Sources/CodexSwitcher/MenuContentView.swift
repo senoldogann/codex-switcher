@@ -71,6 +71,9 @@ struct MenuContentView: View {
 
     private var mainContent: some View {
         Group {
+            if store.allExhausted && !store.profiles.isEmpty {
+                exhaustionBanner
+            }
             if store.profiles.isEmpty {
                 emptyState
             } else {
@@ -82,9 +85,42 @@ struct MenuContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 420)
+                .frame(maxHeight: store.allExhausted ? 360 : 420)
             }
         }
+    }
+
+    private var exhaustionBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(Str.allExhausted)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(gw.opacity(0.8))
+                Spacer()
+            }
+
+            if let info = store.nextResetInfo {
+                Text(L("İlk sıfırlanacak: \(info.profileName) — \(info.resetTime)",
+                       "First reset: \(info.profileName) at \(info.resetTime)"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(gw.opacity(0.45))
+            }
+
+            Button {
+                store.switchToNext(reason: L("Manuel override", "Manual override"))
+            } label: {
+                Text(Str.switchAnyway)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(gw.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(gw.opacity(0.03))
     }
 
     // MARK: - History Content

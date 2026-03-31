@@ -131,6 +131,22 @@ final class AppStore: ObservableObject {
         rateLimits[profile.id]
     }
 
+    var nextResetInfo: (profileName: String, resetTime: String)? {
+        let exhaustedProfiles = profiles.filter { rateLimits[$0.id]?.limitReached == true }
+        let resetTimes = exhaustedProfiles.compactMap { profile -> (String, Date)? in
+            let rl = rateLimits[profile.id]
+            let candidates = [rl?.weeklyResetAt, rl?.fiveHourResetAt].compactMap { $0 }
+            guard let earliest = candidates.min() else { return nil }
+            return (profile.displayName, earliest)
+        }
+        guard let (name, date) = resetTimes.min(by: { $0.1 < $1.1 }) else { return nil }
+        let fmt = DateFormatter()
+        let calendar = Calendar.current
+        let isToday = calendar.isDateInToday(date)
+        fmt.dateFormat = isToday ? "HH:mm" : "d MMM HH:mm"
+        return (name, fmt.string(from: date))
+    }
+
     // MARK: - Usage Polling
 
     private func startUsagePolling() {
