@@ -34,7 +34,17 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 
 ### Download (recommended)
 
-Download the latest `.app` from the [Releases](../../releases) page and move it to `/Applications`.
+1. Download `CodexSwitcher-vX.X.X.zip` from the [Releases](../../releases) page
+2. Unzip and move `CodexSwitcher.app` to `/Applications`
+3. **First launch only** — macOS will block it because the app is not notarized. To open:
+
+   **Option A — GUI:** Open fails → go to **System Settings → Privacy & Security** → scroll down → click **Open Anyway**
+
+   **Option B — Terminal:**
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/CodexSwitcher.app
+   ```
+   Then double-click as normal. You won't be asked again.
 
 ### Build from source
 
