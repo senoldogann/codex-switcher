@@ -57,8 +57,13 @@ final class ProfileManager: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: profileAuthPath.path),
            let data = try? Data(contentsOf: profileAuthPath),
            isValidAuthData(data) {
-            try? data.write(to: Self.codexAuthPath, options: .atomic)
-            return .recovered
+            do {
+                try data.write(to: Self.codexAuthPath, options: .atomic)
+                return .recovered
+            } catch {
+                print("[AuthRecovery] recovery write failed: \(error)")
+                return .unrecoverable
+            }
         }
 
         return .unrecoverable
@@ -66,11 +71,10 @@ final class ProfileManager: @unchecked Sendable {
 
     private func isValidAuthFile(at url: URL, expectedAccountId: String) -> Bool {
         guard let data = try? Data(contentsOf: url),
-              isValidAuthData(data) else { return false }
-        guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tokens = dict["tokens"] as? [String: Any],
               let accessToken = tokens["access_token"] as? String else { return false }
-        let actualId = extractAccountId(from: accessToken)
+        guard let actualId = extractAccountId(from: accessToken) else { return false }
         return actualId == expectedAccountId
     }
 
