@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+*.o
+*.d
+CodexSwitcher.app
+*.xcworkspace
+*.xcodeproj
+.swiftpm/

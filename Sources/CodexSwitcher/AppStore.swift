@@ -1,0 +1,431 @@
+import Foundation
+import UserNotifications
+import AppKit
+import SwiftUI
+
+@MainActor
+final class AppStore: ObservableObject {
+
+    static let shared = AppStore()
+
+    @Published var profiles: [Profile] = []
+    @Published var activeProfile: Profile?
+    @Published var isAddingAccount: Bool = false
+    @Published var addingStep: AddingStep = .idle
+    @Published var pendingProfileEmail: String = ""
+    @Published var aliasText: String = ""
+    @Published var allExhausted: Bool = false
+    @Published var activeTurns: Int = 0
+    @Published var rateLimits: [UUID: RateLimitInfo] = [:]
+    @Published var isFetchingLimits: Bool = false
+
+    static let turnsLimit = 50
+
+    private let profileManager = ProfileManager()
+    private let usageMonitor = UsageMonitor()
+    private let usageTracker = SessionUsageTracker()
+    private let fetcher = RateLimitFetcher()
+    private var usageTimer: Timer?
+    private var rateLimitTimer: Timer?
+    private var authWatcher: DispatchSourceFileSystemObject?
+    private var authWatcherFd: Int32 = -1
+
+    enum AddingStep { case idle, waitingLogin, confirmProfile, done }
+
+    // MARK: - Init
+
+    private init() {
+        profileManager.bootstrap()
+        loadProfiles()
+        requestNotificationPermission()
+
+        usageMonitor.onRateLimit = { [weak self] in
+            Task { @MainActor in self?.handleRateLimitDetected() }
+        }
+        usageMonitor.start()
+        startUsagePolling()
+        startRateLimitPolling()
+    }
+
+    // MARK: - Rate Limit Polling
+
+    private func startRateLimitPolling() {
+        // İlk fetch popover açılınca yapılır; sonra her 5 dakikada sessizce güncelle
+        rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.fetchAllRateLimits(showSpinner: false) }
+        }
+    }
+
+    // MARK: - Rate Limit Fetch (tüm hesaplar için)
+
+    func fetchAllRateLimits(showSpinner: Bool = true) async {
+        if showSpinner { isFetchingLimits = true }
+        defer { if showSpinner { isFetchingLimits = false } }
+
+        let fetcher = self.fetcher
+
+        // Main actor'da Sendable credentials'ları topla
+        let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
+            guard let dict = profileManager.readAuthDict(for: profile),
+                  let creds = fetcher.credentials(from: dict) else { return nil }
+            return (profile.id, creds)
+        }
+        var results: [(UUID, RateLimitInfo?)] = []
+        await withTaskGroup(of: (UUID, RateLimitInfo?).self) { group in
+            for (id, creds) in credPairs {
+                group.addTask {
+                    let info = await fetcher.fetch(credentials: creds)
+                    return (id, info)
+                }
+            }
+            for await pair in group { results.append(pair) }
+        }
+        for (id, info) in results {
+            if let info { rateLimits[id] = info }
+        }
+    }
+
+    func rateLimit(for profile: Profile) -> RateLimitInfo? {
+        rateLimits[profile.id]
+    }
+
+    // MARK: - Usage Polling
+
+    private func startUsagePolling() {
+        refreshActiveTurns()
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshActiveTurns() }
+        }
+    }
+
+    func refreshActiveTurns() {
+        guard let profile = activeProfile, let activatedAt = profile.activatedAt else {
+            activeTurns = usageTracker.turnsInLast(hours: 5)
+            return
+        }
+        activeTurns = usageTracker.turnsSince(activatedAt)
+    }
+
+    private func captureUsageForActive() {
+        guard let active = activeProfile else { return }
+        var config = profileManager.loadConfig()
+        guard let idx = config.profiles.firstIndex(where: { $0.id == active.id }) else { return }
+        config.profiles[idx].lastKnownTurns = activeTurns
+        profileManager.saveConfig(config)
+        profiles = config.profiles
+    }
+
+    // MARK: - Profile Loading
+
+    func loadProfiles() {
+        var config = profileManager.loadConfig()
+        profiles = config.profiles
+        if let id = config.activeProfileId {
+            activeProfile = profiles.first { $0.id == id }
+        } else if let first = profiles.first {
+            activeProfile = first
+            config.activeProfileId = first.id
+            profileManager.saveConfig(config)
+        }
+    }
+
+    // MARK: - Smart Switch
+
+    /// Rate limit verisine göre en iyi hesabı seçer.
+    /// Auto modda tüm hesaplar tükenirse nil döner → allExhausted tetiklenir.
+    private func smartNextProfile(auto: Bool) -> Profile? {
+        let candidates = profiles.filter { $0.id != activeProfile?.id }
+        guard !candidates.isEmpty else { return nil }
+
+        if auto {
+            // Kullanılabilir hesaplar: veri yoksa optimistik (bilinmiyor = dene),
+            // veri varsa limitReached=false VE weekly < 100
+            let available = candidates.filter { profile in
+                guard let rl = rateLimits[profile.id] else { return true } // veri yok → dene
+                return !rl.limitReached && (rl.weeklyUsedPercent ?? 0) < 100
+            }
+
+            // Hiç kullanılabilir hesap yoksa → allExhausted
+            guard !available.isEmpty else { return nil }
+
+            // En düşük haftalık kullanımlı hesabı seç (veri yoksa 0 say)
+            return available.min {
+                (rateLimits[$0.id]?.weeklyUsedPercent ?? 0) < (rateLimits[$1.id]?.weeklyUsedPercent ?? 0)
+            }
+        }
+
+        // Manuel geçiş: round-robin
+        let currentIndex = profiles.firstIndex { $0.id == activeProfile?.id } ?? -1
+        return candidates.first {
+            profiles.firstIndex(of: $0) == (currentIndex + 1) % profiles.count
+        } ?? candidates.first
+    }
+
+    // MARK: - Switching
+
+    func switchToNext(reason: String = L("Manuel geçiş", "Manual switch")) {
+        captureUsageForActive()
+        let isAuto = reason.contains(L("Limit", "Limit"))
+        guard let candidate = smartNextProfile(auto: isAuto) else {
+            allExhausted = true
+            sendNotification(title: Str.allExhausted, body: L("Limitler sıfırlanınca devam eder.", "Will resume when limits reset."))
+            return
+        }
+        activateCandidate(candidate, reason: reason)
+    }
+
+    func switchTo(profile: Profile) {
+        captureUsageForActive()
+        activateCandidate(profile, reason: L("Manuel seçim", "Manual selection"))
+    }
+
+    private func activateCandidate(_ candidate: Profile, reason: String) {
+        do {
+            try profileManager.activate(profile: candidate)
+            var config = profileManager.loadConfig()
+            if let i = config.profiles.firstIndex(where: { $0.id == candidate.id }) {
+                config.profiles[i].activatedAt = Date()
+            }
+            config.activeProfileId = candidate.id
+            profileManager.saveConfig(config)
+            activeProfile = config.profiles.first { $0.id == candidate.id }
+            profiles = config.profiles
+            allExhausted = false
+            activeTurns = 0
+            notifyProfileChanged()
+            sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
+            Task { await fetchAllRateLimits() }
+            restartCodexIfRunning()
+        } catch {
+            sendNotification(title: L("Geçiş başarısız", "Switch failed"), body: error.localizedDescription)
+        }
+    }
+
+    // MARK: - Codex Restart
+
+    private func restartCodexIfRunning() {
+        // Sadece tam adı "Codex" olan ana uygulamayı hedef al
+        // (helper process'leri, simulator'ları ve bizim app'i hariç tut)
+        let codexApps = NSWorkspace.shared.runningApplications.filter { app in
+            app.localizedName == "Codex"
+                && app.bundleIdentifier != Bundle.main.bundleIdentifier
+        }
+        guard !codexApps.isEmpty else { return }
+
+        for app in codexApps {
+            // forceTerminate: dialog göstermeden anında kapat
+            app.forceTerminate()
+        }
+
+        // 2 saniye bekle → uygulama adıyla yeniden aç (bundle path değil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            let task = Process()
+            task.launchPath = "/usr/bin/open"
+            task.arguments  = ["-a", "Codex", "--background"]
+            try? task.run()
+        }
+    }
+
+    // MARK: - Rename
+
+    func renameProfile(_ profile: Profile, alias: String) {
+        var config = profileManager.loadConfig()
+        guard let i = config.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        config.profiles[i].alias = alias
+        profileManager.saveConfig(config)
+        profiles = config.profiles
+        if activeProfile?.id == profile.id {
+            activeProfile = config.profiles[i]
+            notifyProfileChanged()
+        }
+    }
+
+    func showRenameDialog(for profile: Profile) {
+        let alert = NSAlert()
+        alert.messageText = Str.renameTitle
+        alert.informativeText = profile.email
+        alert.addButton(withTitle: Str.save)
+        alert.addButton(withTitle: Str.cancel)
+
+        // Use Codex icon instead of blank app icon
+        if let url = Bundle.module.url(forResource: "codex", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            alert.icon = icon
+        }
+
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        tf.stringValue = profile.alias
+        tf.placeholderString = profile.email
+        tf.bezelStyle = .roundedBezel
+        alert.accessoryView = tf
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let newAlias = tf.stringValue.trimmingCharacters(in: .whitespaces)
+            renameProfile(profile, alias: newAlias)
+        }
+    }
+
+    func handleRateLimitDetected() {
+        guard !allExhausted else { return }
+        switchToNext(reason: "Limit doldu")
+    }
+
+    // MARK: - Add Account
+
+    private var addAccountWindow: NSWindow?
+
+    func openAddAccountWindow() {
+        addingStep = .idle
+        isAddingAccount = false
+        pendingProfileEmail = ""
+        aliasText = ""
+
+        if let w = addAccountWindow, w.isVisible {
+            w.makeKeyAndOrderFront(NSApp)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hosting = NSHostingView(rootView: AddAccountView().environmentObject(self))
+        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 320)
+
+        let window = NSWindow(
+            contentRect: hosting.frame,
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.contentView = hosting
+        window.isReleasedWhenClosed = false
+        let isDark = UserDefaults.standard.object(forKey: "isDarkMode") as? Bool ?? true
+        window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        window.backgroundColor = isDark
+            ? NSColor.black.withAlphaComponent(0.85)
+            : NSColor.white.withAlphaComponent(0.85)
+        window.center()
+        window.makeKeyAndOrderFront(NSApp)
+        NSApp.activate(ignoringOtherApps: true)
+        addAccountWindow = window
+    }
+
+    func closeAddAccountWindow() { addAccountWindow?.close() }
+
+    func beginAddAccount() {
+        isAddingAccount = true
+        addingStep = .waitingLogin
+        openTerminalWithCodexLogin()
+        watchAuthFileForNewLogin()
+    }
+
+    func confirmPendingProfile(alias: String) {
+        guard let newProfile = profileManager.captureCurrentAuth(alias: alias) else {
+            cancelAddAccount()
+            return
+        }
+        var config = profileManager.loadConfig()
+        var profile = newProfile
+        let shouldActivate = config.activeProfileId == nil
+        if shouldActivate { profile.activatedAt = Date() }
+        config.profiles.append(profile)
+        if shouldActivate {
+            config.activeProfileId = profile.id
+            try? profileManager.activate(profile: profile)
+            activeProfile = profile
+        }
+        profileManager.saveConfig(config)
+        profiles = config.profiles
+        addingStep = .done
+        isAddingAccount = false
+        stopAuthWatcher()
+        closeAddAccountWindow()
+        notifyProfileChanged()
+        sendNotification(title: "Hesap eklendi", body: profile.displayName)
+        Task { await fetchAllRateLimits() }
+    }
+
+    func cancelAddAccount() {
+        isAddingAccount = false
+        addingStep = .idle
+        pendingProfileEmail = ""
+        aliasText = ""
+        stopAuthWatcher()
+        closeAddAccountWindow()
+        if let a = activeProfile { try? profileManager.activate(profile: a) }
+    }
+
+    func delete(profile: Profile) {
+        profileManager.deleteProfile(profile)
+        rateLimits.removeValue(forKey: profile.id)
+        var config = profileManager.loadConfig()
+        config.profiles.removeAll { $0.id == profile.id }
+        if config.activeProfileId == profile.id {
+            config.activeProfileId = config.profiles.first?.id
+            if let next = config.profiles.first {
+                try? profileManager.activate(profile: next)
+                activeProfile = next
+            } else { activeProfile = nil }
+        }
+        profileManager.saveConfig(config)
+        profiles = config.profiles
+        notifyProfileChanged()
+    }
+
+    // MARK: - Auth Watcher
+
+    private func watchAuthFileForNewLogin() {
+        stopAuthWatcher()
+        let fd = open(ProfileManager.codexAuthPath.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        authWatcherFd = fd
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+        src.setEventHandler { [weak self] in self?.authFileChanged() }
+        src.setCancelHandler { [weak self] in
+            if let self, self.authWatcherFd >= 0 { close(self.authWatcherFd); self.authWatcherFd = -1 }
+        }
+        src.resume()
+        authWatcher = src
+    }
+
+    private func authFileChanged() {
+        guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = dict["tokens"] as? [String: Any],
+              let access = tokens["access_token"] as? String else { return }
+        pendingProfileEmail = profileManager.extractEmail(from: access) ?? "bilinmeyen"
+        addingStep = .confirmProfile
+    }
+
+    private func stopAuthWatcher() { authWatcher?.cancel(); authWatcher = nil }
+
+    // MARK: - Helpers
+
+    private func openTerminalWithCodexLogin() {
+        let script = """
+        tell application "Terminal"
+            do script "echo '=== Codex Switcher: Yeni hesap ===' && codex login"
+            activate
+        end tell
+        """
+        var err: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&err)
+    }
+
+    private func notifyProfileChanged() {
+        NotificationCenter.default.post(name: .profileChanged, object: nil)
+    }
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func sendNotification(title: String, body: String) {
+        let c = UNMutableNotificationContent()
+        c.title = title; c.body = body; c.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+    }
+}
