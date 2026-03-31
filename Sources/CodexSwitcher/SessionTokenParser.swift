@@ -225,28 +225,84 @@ final class SessionTokenParser: @unchecked Sendable {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return AccountTokenUsage() }
         var last = AccountTokenUsage()
         var found = false
+        var currentModel: String? = nil
 
         for line in content.components(separatedBy: "\n") {
             let t = line.trimmingCharacters(in: .whitespaces)
             guard !t.isEmpty,
                   let data = t.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  json["type"] as? String == "event_msg",
-                  let payload = json["payload"] as? [String: Any],
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            let type = json["type"] as? String
+
+            // Track model from turn_context
+            if type == "turn_context" {
+                if let payload = json["payload"] as? [String: Any] {
+                    if let model = payload["model"] as? String {
+                        currentModel = normalizeModel(model)
+                    } else if let info = payload["info"] as? [String: Any], let model = info["model"] as? String {
+                        currentModel = normalizeModel(model)
+                    }
+                }
+                continue
+            }
+
+            // Track token counts
+            guard type == "event_msg" else { continue }
+            guard let payload = json["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
                   let total = info["total_token_usage"] as? [String: Any]
             else { continue }
 
+            // Determine model for this token count
+            let modelFromInfo = info["model"] as? String ?? info["model_name"] as? String
+            let modelFromPayload = payload["model"] as? String
+            let modelFromRoot = json["model"] as? String
+            let effectiveModel = modelFromInfo ?? modelFromPayload ?? modelFromRoot ?? currentModel ?? "gpt-5"
+            let normalizedModel = normalizeModel(effectiveModel)
+
+            let input = (total["input_tokens"] as? NSNumber)?.intValue ?? 0
+            let cached = (total["cached_input_tokens"] as? NSNumber)?.intValue ?? (total["cache_read_input_tokens"] as? NSNumber)?.intValue ?? 0
+            let output = (total["output_tokens"] as? NSNumber)?.intValue ?? 0
+
             last = AccountTokenUsage(
-                inputTokens:       (total["input_tokens"]            as? Int) ?? 0,
-                cachedInputTokens: (total["cached_input_tokens"]     as? Int) ?? 0,
-                outputTokens:      (total["output_tokens"]           as? Int) ?? 0,
-                reasoningTokens:   (total["reasoning_output_tokens"] as? Int) ?? 0,
-                sessionCount:      1
+                inputTokens: input,
+                cachedInputTokens: cached,
+                outputTokens: output,
+                reasoningTokens: 0,
+                sessionCount: 1,
+                modelUsage: [normalizedModel: ModelTokenUsage(
+                    inputTokens: input,
+                    cachedInputTokens: cached,
+                    outputTokens: output,
+                    sessionCount: 1
+                )]
             )
             found = true
         }
         return found ? last : AccountTokenUsage()
+    }
+
+    /// Normalize model name to match pricing keys
+    private func normalizeModel(_ raw: String) -> String {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("openai/") {
+            trimmed = String(trimmed.dropFirst("openai/".count))
+        }
+        // Strip date suffix: gpt-5-2025-01-15 -> gpt-5
+        if let datedSuffix = trimmed.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) {
+            let base = String(trimmed[..<datedSuffix.lowerBound])
+            let knownModels = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro",
+                               "gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini",
+                               "gpt-5.2", "gpt-5.2-codex", "gpt-5.2-pro",
+                               "gpt-5.3-codex", "gpt-5.3-codex-spark",
+                               "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro"]
+            if knownModels.contains(base) {
+                return base
+            }
+        }
+        return trimmed
     }
 }

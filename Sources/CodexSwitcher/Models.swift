@@ -52,19 +52,50 @@ struct AccountTokenUsage: Codable {
     var outputTokens: Int = 0
     var reasoningTokens: Int = 0
     var sessionCount: Int = 0
+    var modelUsage: [String: ModelTokenUsage] = [:]  // model name -> usage
 
     var totalTokens: Int { inputTokens + outputTokens }
-    /// Cache'lenmemiş gerçek input (faturalandırılabilir)
     var effectiveInputTokens: Int { max(0, inputTokens - cachedInputTokens) }
 
     static func + (lhs: AccountTokenUsage, rhs: AccountTokenUsage) -> AccountTokenUsage {
-        AccountTokenUsage(
+        var mergedModels = lhs.modelUsage
+        for (model, usage) in rhs.modelUsage {
+            mergedModels[model, default: ModelTokenUsage()] = mergedModels[model, default: ModelTokenUsage()] + usage
+        }
+        return AccountTokenUsage(
             inputTokens:       lhs.inputTokens       + rhs.inputTokens,
             cachedInputTokens: lhs.cachedInputTokens + rhs.cachedInputTokens,
             outputTokens:      lhs.outputTokens      + rhs.outputTokens,
             reasoningTokens:   lhs.reasoningTokens   + rhs.reasoningTokens,
+            sessionCount:      lhs.sessionCount      + rhs.sessionCount,
+            modelUsage:        mergedModels
+        )
+    }
+}
+
+/// Per-model token usage tracking
+struct ModelTokenUsage: Codable, Equatable {
+    var inputTokens: Int = 0
+    var cachedInputTokens: Int = 0
+    var outputTokens: Int = 0
+    var sessionCount: Int = 0
+
+    var totalTokens: Int { inputTokens + outputTokens }
+
+    static func + (lhs: ModelTokenUsage, rhs: ModelTokenUsage) -> ModelTokenUsage {
+        ModelTokenUsage(
+            inputTokens:       lhs.inputTokens       + rhs.inputTokens,
+            cachedInputTokens: lhs.cachedInputTokens + rhs.cachedInputTokens,
+            outputTokens:      lhs.outputTokens      + rhs.outputTokens,
             sessionCount:      lhs.sessionCount      + rhs.sessionCount
         )
+    }
+    
+    static func += (lhs: inout ModelTokenUsage, rhs: ModelTokenUsage) {
+        lhs.inputTokens += rhs.inputTokens
+        lhs.cachedInputTokens += rhs.cachedInputTokens
+        lhs.outputTokens += rhs.outputTokens
+        lhs.sessionCount += rhs.sessionCount
     }
 }
 
