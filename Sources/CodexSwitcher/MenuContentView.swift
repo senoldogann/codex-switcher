@@ -308,6 +308,14 @@ struct MenuContentView: View {
         .pointerCursor()
         .onHover { h in hoveredId = h ? profile.id : nil }
         .contextMenu {
+            if store.staleProfileIds.contains(profile.id) {
+                Button {
+                    store.beginRelogin(for: profile)
+                } label: {
+                    Label(L("Girişi Yenile", "Re-login"), systemImage: "arrow.clockwise.circle")
+                }
+                Divider()
+            }
             Button {
                 store.showRenameDialog(for: profile)
             } label: {
@@ -394,6 +402,13 @@ struct MenuContentView: View {
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(gw.opacity(0.32))
 
+            // Most-used model
+            if let topModel = u.modelUsage.max(by: { $0.value.totalTokens < $1.value.totalTokens })?.key {
+                Text("· \(topModel)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(gw.opacity(0.22))
+            }
+
             if u.cachedInputTokens > 0 {
                 Text("·")
                     .foregroundStyle(gw.opacity(0.2))
@@ -403,7 +418,7 @@ struct MenuContentView: View {
             }
 
             if u.sessionCount > 1 {
-                Text("· \(u.sessionCount) sessions")
+                Text("· \(u.sessionCount) sess")
                     .font(.system(size: 9))
                     .foregroundStyle(gw.opacity(0.22))
             }
@@ -536,6 +551,11 @@ struct MenuContentView: View {
                 settingsBtn(isDarkMode ? "moon.fill" : "sun.max",
                             isDarkMode ? Str.dark : Str.light) {
                     isDarkMode.toggle()
+                }
+                thinDivider
+                // Reset token statistics
+                settingsBtn("arrow.counterclockwise", L("Sıfırla", "Reset")) {
+                    store.resetStatistics()
                 }
             }
             .frame(height: 36)

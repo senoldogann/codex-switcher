@@ -44,6 +44,9 @@ final class AppStore: ObservableObject {
     private var lastAuthWriteDate: Date?
     private var consecutiveFetchFailures: Int = 0
     private var paceHistory: [SessionPacePoint] = []
+    private var tokenRefreshWork: DispatchWorkItem?
+    private var warned80PercentIds: Set<UUID> = []
+    private var reloginTargetId: UUID? = nil
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -63,7 +66,7 @@ final class AppStore: ObservableObject {
             Task { @MainActor in self?.handleRateLimitDetected() }
         }
         usageMonitor.onTokenUpdate = { [weak self] in
-            self?.refreshTokenUsage()
+            self?.scheduleTokenRefresh()
         }
         usageMonitor.onSessionActivity = { [weak self] in
             Task { @MainActor in
@@ -85,10 +88,18 @@ final class AppStore: ObservableObject {
     private func startRateLimitPolling() {
         // İlk fetch hemen yap (status bar'ın veri göstermesi için)
         Task { await fetchAllRateLimits(showSpinner: false) }
-        // Sonra her 60 saniyede sessizce güncelle
-        rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        // Arka planda her 5 dakikada sessizce güncelle (60s çok sıktı, pil tüketiyordu)
+        rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.fetchAllRateLimits(showSpinner: false) }
         }
+    }
+
+    /// Token refresh'i debounce eder — aktif session'da her yazımda değil, 10s sessizlik sonra çalışır.
+    private func scheduleTokenRefresh() {
+        tokenRefreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refreshTokenUsage() }
+        tokenRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
     }
 
     // MARK: - Rate Limit Fetch (tüm hesaplar için)
@@ -131,14 +142,26 @@ final class AppStore: ObservableObject {
             case .success(let info):
                 rateLimits[id] = info
                 successCount += 1
+                let profileName = profiles.first(where: { $0.id == id })?.displayName ?? L("Hesap", "Account")
                 // Restored notification
                 if lastKnownLimitState[id] == true, info.limitReached == false {
                     sendNotification(
                         title: L("Limit sıfırlandı", "Limit reset"),
-                        body: L("\(profiles.first(where: { $0.id == id })?.displayName ?? "Hesap") kullanıma hazır", "Account is ready to use again")
+                        body: L("\(profileName) kullanıma hazır", "\(profileName) is ready to use again")
                     )
+                    warned80PercentIds.remove(id) // reset warning for next cycle
                 }
                 lastKnownLimitState[id] = info.limitReached
+                // %80 uyarısı — henüz uyarılmamışsa ve limit dolmamışsa
+                if let used = info.weeklyUsedPercent,
+                   used >= 80, !info.limitReached,
+                   !warned80PercentIds.contains(id) {
+                    warned80PercentIds.insert(id)
+                    sendNotification(
+                        title: L("Limit uyarısı", "Limit warning"),
+                        body: L("\(profileName) haftalık limitinin %\(100 - used)'i kaldı", "\(profileName) has \(100 - used)% weekly limit remaining")
+                    )
+                }
             case .stale:
                 newStale.insert(id)
             case .failure:
@@ -566,6 +589,74 @@ final class AppStore: ObservableObject {
         stopAuthWatcher()
         closeAddAccountWindow()
         if let a = activeProfile { try? profileManager.activate(profile: a) }
+    }
+
+    // MARK: - Statistics Reset
+
+    func resetStatistics() {
+        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex-switcher/cache")
+        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json"))
+        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json.mod"))
+        tokenUsage = [:]
+        costs = [:]
+        forecasts = [:]
+        warned80PercentIds = []
+    }
+
+    // MARK: - Re-login for Stale Accounts
+
+    func beginRelogin(for profile: Profile) {
+        reloginTargetId = profile.id
+        openTerminalWithCodexLogin()
+        watchAuthFileForRelogin()
+    }
+
+    private func watchAuthFileForRelogin() {
+        stopAuthWatcher()
+        let fd = open(ProfileManager.codexAuthPath.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        authWatcherFd = fd
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+        src.setEventHandler { [weak self] in self?.reloginAuthChanged() }
+        src.setCancelHandler { [weak self] in
+            if let self, self.authWatcherFd >= 0 { close(self.authWatcherFd); self.authWatcherFd = -1 }
+        }
+        src.resume()
+        authWatcher = src
+    }
+
+    private func reloginAuthChanged() {
+        guard let targetId = reloginTargetId else { return }
+        if let last = lastAuthWriteDate, Date().timeIntervalSince(last) < 0.5 { return }
+        lastAuthWriteDate = Date()
+
+        guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = dict["tokens"] as? [String: Any],
+              let accessToken = tokens["access_token"] as? String,
+              let newAccountId = profileManager.extractAccountId(from: accessToken) else { return }
+
+        reloginTargetId = nil
+        stopAuthWatcher()
+
+        guard let profile = profiles.first(where: { $0.id == targetId }) else { return }
+
+        if profile.accountId == newAccountId {
+            try? data.write(to: profileManager.authPath(for: profile), options: .atomic)
+            staleProfileIds.remove(targetId)
+            sendNotification(
+                title: L("Giriş yenilendi", "Re-login successful"),
+                body: profile.displayName
+            )
+            Task { await fetchAllRateLimits() }
+        } else {
+            sendNotification(
+                title: L("Hatalı hesap", "Wrong account"),
+                body: L("Farklı bir hesaba giriş yapıldı. Tekrar deneyin.", "A different account was detected. Please try again.")
+            )
+        }
     }
 
     func delete(profile: Profile) {

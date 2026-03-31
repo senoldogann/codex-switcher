@@ -68,18 +68,34 @@ import Foundation
 
     private func watchExistingSessionFiles() {
         let fm = FileManager.default
+        // Only watch files modified in the last 14 days — avoids opening hundreds
+        // of O_EVTONLY file descriptors for old session files that will never change.
+        let cutoff = Date().addingTimeInterval(-14 * 24 * 3600)
         guard let enumerator = fm.enumerator(
             at: sessionsDir,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else { return }
 
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
+            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            guard modDate > cutoff else { continue }
             let path = url.path
             if fileWatchers[path] == nil {
                 watchFile(at: path)
             }
+        }
+
+        // Prune watchers for files that are now older than 14 days
+        let stale = fileWatchers.keys.filter { path in
+            let modDate = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date.distantPast
+            return modDate < cutoff
+        }
+        for path in stale {
+            fileWatchers[path]?.cancel()
+            fileWatchers.removeValue(forKey: path)
+            fileTails.removeValue(forKey: path)
         }
     }
 
