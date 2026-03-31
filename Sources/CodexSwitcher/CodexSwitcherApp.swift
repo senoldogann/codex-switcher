@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .appearanceChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(updateStatusLabel),
+            name: .rateLimitsUpdated,
+            object: nil
+        )
         updateStatusLabel()
     }
 
@@ -49,18 +55,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func updateStatusLabel() {
         guard let button = statusItem.button else { return }
-        let profile = store.activeProfile
         let exhausted = store.allExhausted
 
-        let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         let icon = NSImage(
             systemSymbolName: exhausted ? "exclamationmark.circle.fill" : "arrow.triangle.2.circlepath",
             accessibilityDescription: nil
         )?.withSymbolConfiguration(cfg)
 
         button.image = icon
-        button.imagePosition = .imageOnly
-        button.title = ""
+
+        // Active profile rate limit özeti
+        if exhausted {
+            button.title = " !"
+            button.imagePosition = .imageLeft
+        } else if let profile = store.activeProfile,
+                  let rl = store.rateLimit(for: profile) {
+            var parts: [String] = []
+            if let w = rl.weeklyRemainingPercent { parts.append("W:\(w)%") }
+            if rl.isPlus, let h = rl.fiveHourRemainingPercent { parts.append("5h:\(h)%") }
+            if parts.isEmpty {
+                button.title = ""
+                button.imagePosition = .imageOnly
+            } else {
+                button.title = " " + parts.joined(separator: "  ")
+                button.imagePosition = .imageLeft
+            }
+        } else {
+            button.title = ""
+            button.imagePosition = .imageOnly
+        }
     }
 
     // MARK: - Popover
@@ -104,4 +128,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let profileChanged  = Notification.Name("ProfileChanged")
     static let appearanceChanged = Notification.Name("AppearanceChanged")
+    static let rateLimitsUpdated = Notification.Name("RateLimitsUpdated")
 }

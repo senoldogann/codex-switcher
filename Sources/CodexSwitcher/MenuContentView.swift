@@ -4,6 +4,7 @@ struct MenuContentView: View {
     @EnvironmentObject var store: AppStore
     @State private var hoveredId: UUID? = nil
     @State private var appeared = false
+    @State private var showHistory = false
 
     @AppStorage("emailsBlurred") private var emailsBlurred: Bool = false
     @AppStorage("isDarkMode")    private var isDarkMode: Bool = true
@@ -108,6 +109,11 @@ struct MenuContentView: View {
                             .scaleEffect(0.5)
                             .frame(height: 12)
                     }
+
+                    // Token usage
+                    if let usage = store.tokenUsage(for: profile), usage.totalTokens > 0 {
+                        tokenUsageRow(usage)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -203,6 +209,112 @@ struct MenuContentView: View {
         }
     }
 
+    // MARK: - Token Usage Row
+
+    private func tokenUsageRow(_ u: AccountTokenUsage) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "cpu")
+                .font(.system(size: 8))
+                .foregroundStyle(gw.opacity(0.3))
+
+            Text("\(formatTokens(u.totalTokens)) tokens")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(gw.opacity(0.32))
+
+            if u.cachedInputTokens > 0 {
+                Text("·")
+                    .foregroundStyle(gw.opacity(0.2))
+                Text("\(formatTokens(u.cachedInputTokens)) cached")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(gw.opacity(0.22))
+            }
+
+            if u.sessionCount > 1 {
+                Text("· \(u.sessionCount) sessions")
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.22))
+            }
+        }
+    }
+
+    private func formatTokens(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000     { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    // MARK: - History Sheet
+
+    private var historySheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(Str.history)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(gw.opacity(0.8))
+                Spacer()
+                Button { showHistory = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(gw.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider().background(gw.opacity(0.07))
+
+            if store.switchHistory.isEmpty {
+                Text(Str.noHistory)
+                    .font(.system(size: 12))
+                    .foregroundStyle(gw.opacity(0.35))
+                    .padding(30)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.switchHistory.reversed()) { event in
+                            historyRow(event)
+                            Divider().background(gw.opacity(0.05))
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .background(.ultraThinMaterial)
+        .background(scheme == .dark ? Color.black.opacity(0.35) : Color.white.opacity(0.15))
+        .preferredColorScheme(isDarkMode ? .dark : .light)
+    }
+
+    private func historyRow(_ event: SwitchEvent) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                if let from = event.fromAccountName {
+                    Text(from)
+                        .font(.system(size: 11))
+                        .foregroundStyle(gw.opacity(0.45))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(gw.opacity(0.3))
+                }
+                Text(event.toAccountName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(gw.opacity(0.8))
+            }
+            HStack(spacing: 6) {
+                Text(event.reason)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.3))
+                Text(event.timestamp, style: .relative)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.25))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: - Codex Avatar
 
     private func codexAvatar(size: CGFloat, active: Bool) -> some View {
@@ -247,9 +359,12 @@ struct MenuContentView: View {
                 footerBtn("arrow.triangle.2.circlepath", Str.switchNow) { store.switchToNext() }
                     .disabled(store.profiles.count < 2)
                 thinDivider
+                footerBtn("clock.arrow.trianglehead.counterclockwise.rotate.90", Str.history) { showHistory = true }
+                thinDivider
                 footerBtn("power", Str.quit) { NSApplication.shared.terminate(nil) }
             }
             .frame(height: 44)
+            .sheet(isPresented: $showHistory) { historySheet }
 
             settingsBar
         }

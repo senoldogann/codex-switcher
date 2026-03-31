@@ -18,17 +18,23 @@ final class AppStore: ObservableObject {
     @Published var activeTurns: Int = 0
     @Published var rateLimits: [UUID: RateLimitInfo] = [:]
     @Published var isFetchingLimits: Bool = false
+    @Published var switchHistory: [SwitchEvent] = []
+    @Published var tokenUsage: [UUID: AccountTokenUsage] = [:]
 
     static let turnsLimit = 50
+    static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)
 
     private let profileManager = ProfileManager()
     private let usageMonitor = UsageMonitor()
     private let usageTracker = SessionUsageTracker()
     private let fetcher = RateLimitFetcher()
+    private let historyStore = SwitchHistoryStore()
+    private let tokenParser = SessionTokenParser()
     private var usageTimer: Timer?
     private var rateLimitTimer: Timer?
     private var authWatcher: DispatchSourceFileSystemObject?
     private var authWatcherFd: Int32 = -1
+    private var lastAutoSwitchDate: Date?
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -37,6 +43,7 @@ final class AppStore: ObservableObject {
     private init() {
         profileManager.bootstrap()
         loadProfiles()
+        switchHistory = historyStore.load()
         requestNotificationPermission()
 
         usageMonitor.onRateLimit = { [weak self] in
@@ -83,6 +90,26 @@ final class AppStore: ObservableObject {
         for (id, info) in results {
             if let info { rateLimits[id] = info }
         }
+        NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
+        refreshTokenUsage()
+    }
+
+    func refreshTokenUsage() {
+        let profiles = self.profiles
+        let history  = self.switchHistory
+        Task { @MainActor in
+            let usage = await withCheckedContinuation { cont in
+                DispatchQueue.global(qos: .utility).async {
+                    let result = SessionTokenParser().calculate(profiles: profiles, history: history)
+                    cont.resume(returning: result)
+                }
+            }
+            self.tokenUsage = usage
+        }
+    }
+
+    func tokenUsage(for profile: Profile) -> AccountTokenUsage? {
+        tokenUsage[profile.id]
     }
 
     func rateLimit(for profile: Profile) -> RateLimitInfo? {
@@ -180,6 +207,19 @@ final class AppStore: ObservableObject {
     }
 
     private func activateCandidate(_ candidate: Profile, reason: String) {
+        // Switch event'ini kaydet
+        let event = SwitchEvent(
+            id: UUID(),
+            timestamp: Date(),
+            fromAccountName: activeProfile?.displayName,
+            fromAccountId: activeProfile?.id,
+            toAccountName: candidate.displayName,
+            toAccountId: candidate.id,
+            reason: reason
+        )
+        historyStore.append(event)
+        switchHistory = historyStore.load()
+
         do {
             try profileManager.activate(profile: candidate)
             var config = profileManager.loadConfig()
@@ -217,12 +257,15 @@ final class AppStore: ObservableObject {
             app.forceTerminate()
         }
 
-        // 2 saniye bekle → uygulama adıyla yeniden aç (bundle path değil)
+        // 2 saniye bekle → bundle ID ile yeniden aç (dock'ta görünmez)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            let task = Process()
-            task.launchPath = "/usr/bin/open"
-            task.arguments  = ["-a", "Codex", "--background"]
-            try? task.run()
+            NSWorkspace.shared.open(
+                [],
+                withAppBundleIdentifier: "com.openai.codex",
+                options: [.withoutActivation],
+                additionalEventParamDescriptor: nil,
+                launchIdentifiers: nil
+            )
         }
     }
 
@@ -269,7 +312,11 @@ final class AppStore: ObservableObject {
 
     func handleRateLimitDetected() {
         guard !allExhausted else { return }
-        switchToNext(reason: "Limit doldu")
+        // Cooldown: son otomatik geçişten bu yana yeterli süre geçmedi mi?
+        if let last = lastAutoSwitchDate,
+           Date().timeIntervalSince(last) < Self.switchCooldown { return }
+        lastAutoSwitchDate = Date()
+        switchToNext(reason: L("Limit doldu", "Limit reached"))
     }
 
     // MARK: - Add Account

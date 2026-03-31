@@ -43,6 +43,9 @@ enum Str {
     static var lastKnown:    String { L("son",                 "last") }
     static var unknownUsage: String { L("kullanım bilinmiyor", "usage unknown") }
     static var resets:       String { L("Sıfırlanma",         "Resets") }
+    // History
+    static var history:      String { L("Geçmiş",             "History") }
+    static var noHistory:    String { L("Henüz geçiş yok",    "No switches yet") }
     // Settings bar
     static var dark:         String { L("Koyu",               "Dark") }
     static var light:        String { L("Açık",               "Light") }
