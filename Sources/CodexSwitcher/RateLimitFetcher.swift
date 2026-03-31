@@ -46,6 +46,12 @@ struct RateLimitInfo {
     }
 }
 
+enum FetchResult {
+    case success(RateLimitInfo)
+    case stale
+    case failure
+}
+
 final class RateLimitFetcher: @unchecked Sendable {
 
     private let session: URLSession = {
@@ -60,20 +66,31 @@ final class RateLimitFetcher: @unchecked Sendable {
         return AuthCredentials(accessToken: access, accountId: tokens["account_id"] as? String ?? "")
     }
 
-    func fetch(credentials: AuthCredentials) async -> RateLimitInfo? {
+    func fetch(credentials: AuthCredentials) async -> FetchResult {
         var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
         req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(credentials.accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         req.setValue("codex-cli", forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        guard let (data, response) = try? await session.data(for: req) else { return nil }
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard statusCode == 200 else {
-            print("[RateLimit] fetch failed for \(credentials.accountId), status: \(statusCode)")
-            return nil
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            return .failure
         }
-        return parse(data)
+
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+        switch statusCode {
+        case 200:
+            guard let info = parse(data) else { return .failure }
+            return .success(info)
+        case 401, 403:
+            return .stale
+        default:
+            return .failure
+        }
     }
 
     private func parse(_ data: Data) -> RateLimitInfo? {
