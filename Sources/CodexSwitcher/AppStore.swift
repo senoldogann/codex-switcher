@@ -594,11 +594,15 @@ final class AppStore: ObservableObject {
     // MARK: - Helpers
 
     private func openTerminalWithCodexLogin() {
-        // Terminal acmak yerine dogrudan browser'da login sayfasini ac
-        // codex login komutu da zaten sadece browser aciyor
-        if let url = URL(string: "https://chatgpt.com/?login=1") {
-            NSWorkspace.shared.open(url)
-        }
+        // codex login'i arka planda calistir — Terminal acilmaz
+        // codex login kendi browser'ini acar ve auth.json'u yazar
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["codex", "login"]
+        task.standardInput = nil
+        task.standardOutput = nil
+        task.standardError = nil
+        try? task.run()
     }
 
     private func notifyProfileChanged() {
