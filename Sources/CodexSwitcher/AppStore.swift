@@ -149,7 +149,7 @@ final class AppStore: ObservableObject {
         staleProfileIds = newStale
         NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
         refreshTokenUsage()
-        updateCostsAndForecasts()
+        // Note: updateCostsAndForecasts is called within refreshTokenUsage after async completion
     }
 
     func refreshTokenUsage() {
@@ -158,14 +158,17 @@ final class AppStore: ObservableObject {
         let parser   = self.tokenParser
         DispatchQueue.global(qos: .utility).async {
             let result = parser.calculate(profiles: profiles, history: history)
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                // Verify profiles list hasn't changed dramatically
+                guard self.profiles.count == profiles.count else { return }
                 self.tokenUsage = result
-                self.updateCostsAndForecasts()
+                self.updateCostsAndForecasts(profiles: profiles)
             }
         }
     }
 
-    private func updateCostsAndForecasts() {
+    private func updateCostsAndForecasts(profiles: [Profile]) {
         let calculator = CostCalculator()
         var newCosts: [UUID: Double] = [:]
         var newForecasts: [UUID: RateLimitForecast] = [:]
@@ -355,10 +358,17 @@ final class AppStore: ObservableObject {
         }
         config.activeProfileId = candidate.id
         profileManager.saveConfig(config)
-        activeProfile = config.profiles.first { $0.id == candidate.id }
+        
+        // Update state atomically
+        let newActiveProfile = config.profiles.first { $0.id == candidate.id }
+        activeProfile = newActiveProfile
         profiles = config.profiles
         allExhausted = false
         activeTurns = 0
+        
+        // Refresh token usage with updated history
+        refreshTokenUsage()
+        
         notifyProfileChanged()
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
