@@ -85,6 +85,29 @@ final class ProfileManager: @unchecked Sendable {
         return true
     }
 
+    /// Verify that the current auth.json matches the expected account.
+    func verifyActiveAccount(expectedAccountId: String) -> VerifyResult {
+        guard FileManager.default.fileExists(atPath: Self.codexAuthPath.path) else {
+            return .failed(.fileMissing)
+        }
+        guard let data = try? Data(contentsOf: Self.codexAuthPath),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = dict["tokens"] as? [String: Any],
+              let accessToken = tokens["access_token"] as? String else {
+            return .failed(.invalidJSON)
+        }
+        guard let actualId = extractAccountId(from: accessToken) else {
+            return .failed(.jwtParseFailed)
+        }
+        guard !actualId.isEmpty else {
+            return .failed(.claimNotFound)
+        }
+        guard actualId == expectedAccountId else {
+            return .failed(.mismatch(expected: expectedAccountId, actual: actualId))
+        }
+        return .verified
+    }
+
     // MARK: - Config I/O
 
     func loadConfig() -> AppConfig {
@@ -140,19 +163,49 @@ final class ProfileManager: @unchecked Sendable {
         return profile
     }
 
-    /// Profili aktif et — auth.json'u atomik olarak değiştir
-    func activate(profile: Profile) throws {
+    /// Profili aktif et — backup oluştur, atomik olarak değiştir, doğrula.
+    /// Doğrulama başarısızsa backup'tan geri döner.
+    @discardableResult
+    func activate(profile: Profile) throws -> VerifyResult {
         let src = authPath(for: profile)
         guard FileManager.default.fileExists(atPath: src.path) else {
             throw SwitcherError.missingAuthFile(profile.email)
         }
 
-        let data = try Data(contentsOf: src)
-        // Atomic write: temp → rename
+        let newData = try Data(contentsOf: src)
+
+        // Backup current auth.json
+        if FileManager.default.fileExists(atPath: Self.codexAuthPath.path) {
+            try? FileManager.default.copyItem(
+                at: Self.codexAuthPath,
+                to: Self.authBackupPath
+            )
+        }
+
+        // Atomic write
         let tmp = Self.codexAuthPath.deletingLastPathComponent()
             .appendingPathComponent(".auth_tmp_\(UUID().uuidString).json")
-        try data.write(to: tmp, options: .atomic)
-        _ = try? FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: tmp)
+        try newData.write(to: tmp, options: .atomic)
+        guard (try? FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: tmp)) != nil else {
+            throw SwitcherError.activationFailed(profile.email)
+        }
+
+        // Verify
+        let verifyResult = verifyActiveAccount(expectedAccountId: profile.accountId)
+        if case .failed = verifyResult {
+            // Rollback from backup
+            if FileManager.default.fileExists(atPath: Self.authBackupPath.path) {
+                try? FileManager.default.replaceItemAt(
+                    Self.codexAuthPath,
+                    withItemAt: Self.authBackupPath
+                )
+            }
+        } else {
+            // Success — clean up backup
+            try? FileManager.default.removeItem(at: Self.authBackupPath)
+        }
+
+        return verifyResult
     }
 
     func deleteProfile(_ profile: Profile) {
@@ -198,6 +251,7 @@ enum SwitcherError: LocalizedError {
     case missingAuthFile(String)
     case noProfilesAvailable
     case allProfilesExhausted
+    case activationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -207,6 +261,8 @@ enum SwitcherError: LocalizedError {
             return "Henüz hesap eklenmedi."
         case .allProfilesExhausted:
             return "Tüm hesapların limiti doldu!"
+        case .activationFailed(let email):
+            return "Aktivasyon başarısız: \(email)"
         }
     }
 }
@@ -215,4 +271,17 @@ enum AuthVerificationResult {
     case valid
     case recovered
     case unrecoverable
+}
+
+enum VerifyResult: Equatable {
+    case verified
+    case failed(VerifyError)
+}
+
+enum VerifyError: Equatable {
+    case fileMissing
+    case invalidJSON
+    case jwtParseFailed
+    case claimNotFound
+    case mismatch(expected: String, actual: String)
 }
