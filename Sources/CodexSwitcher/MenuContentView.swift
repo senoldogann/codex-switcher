@@ -216,6 +216,12 @@ struct MenuContentView: View {
                                 .frame(width: 5, height: 5)
                                 .shadow(color: .green, radius: 4)
                         }
+
+                        if let rl = store.rateLimit(for: profile), rl.limitReached {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.red.opacity(0.6))
+                        }
                     }
 
                     // Email — blurrable
