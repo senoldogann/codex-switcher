@@ -463,8 +463,9 @@ final class AppStore: ObservableObject {
     }
 
     private func authFileChanged() {
-        // Debounce: ignore events within 500ms of our own write
+        // Debounce: ignore events within 500ms of our own write or last external event
         if let last = lastAuthWriteDate, Date().timeIntervalSince(last) < 0.5 { return }
+        lastAuthWriteDate = Date() // reset for rapid external events too
 
         if isAddingAccount {
             // Existing add-account flow
