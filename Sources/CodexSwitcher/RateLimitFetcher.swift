@@ -5,7 +5,7 @@ struct AuthCredentials: Sendable {
     let accountId: String
 }
 
-struct RateLimitInfo {
+struct RateLimitInfo: Sendable {
     var planType: String = "free"
     var allowed: Bool = true
     var limitReached: Bool = false
