@@ -20,6 +20,7 @@ final class AppStore: ObservableObject {
     @Published var isFetchingLimits: Bool = false
     @Published var switchHistory: [SwitchEvent] = []
     @Published var tokenUsage: [UUID: AccountTokenUsage] = [:]
+    @Published var staleProfileIds: Set<UUID> = []
 
     static let turnsLimit = 50
     static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)
@@ -75,25 +76,34 @@ final class AppStore: ObservableObject {
 
         let fetcher = self.fetcher
 
-        // Main actor'da Sendable credentials'ları topla
         let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
             guard let dict = profileManager.readAuthDict(for: profile),
                   let creds = fetcher.credentials(from: dict) else { return nil }
             return (profile.id, creds)
         }
-        var results: [(UUID, RateLimitInfo?)] = []
-        await withTaskGroup(of: (UUID, RateLimitInfo?).self) { group in
+        var results: [(UUID, FetchResult)] = []
+        await withTaskGroup(of: (UUID, FetchResult).self) { group in
             for (id, creds) in credPairs {
                 group.addTask {
-                    let info = await fetcher.fetch(credentials: creds)
-                    return (id, info)
+                    let result = await fetcher.fetch(credentials: creds)
+                    return (id, result)
                 }
             }
             for await pair in group { results.append(pair) }
         }
-        for (id, info) in results {
-            if let info { rateLimits[id] = info }
+
+        var newStale: Set<UUID> = []
+        for (id, result) in results {
+            switch result {
+            case .success(let info):
+                rateLimits[id] = info
+            case .stale:
+                newStale.insert(id)
+            case .failure:
+                break // keep existing rateLimits entry if any
+            }
         }
+        staleProfileIds = newStale
         NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
         refreshTokenUsage()
     }
@@ -244,36 +254,17 @@ final class AppStore: ObservableObject {
     // MARK: - Codex Restart
 
     private func restartCodexIfRunning() {
-        // Sadece tam adı "Codex" olan ana uygulamayı hedef al
-        // (helper process'leri, simulator'ları ve bizim app'i hariç tut)
-        let codexApps = NSWorkspace.shared.runningApplications.filter { app in
-            app.localizedName == "Codex"
-                && app.bundleIdentifier != Bundle.main.bundleIdentifier
+        // Codex'i otomatik restart ETME — aktif stream'i koparır
+        // "stream disconnected before completion" hatasına sebep olur.
+        // Sadece kullanıcıya bildirim gönder, bir sonraki istekte yeni auth kullanılır.
+        let codexRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }
-        guard !codexApps.isEmpty else { return }
-
-        for app in codexApps {
-            // Önce graceful terminate dene (aktif stream'in bitmesine fırsat ver)
-            app.terminate()
-        }
-
-        // 3 saniye bekle — uygulama kapandıysa devam et, kapanmadıysa force
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            for app in codexApps where app.isTerminated == false {
-                app.forceTerminate()
-            }
-        }
-
-        // 4 saniye bekle → bundle ID ile yeniden aç (dock'ta görünmez)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-            NSWorkspace.shared.open(
-                [],
-                withAppBundleIdentifier: "com.openai.codex",
-                options: [.withoutActivation],
-                additionalEventParamDescriptor: nil,
-                launchIdentifiers: nil
-            )
-        }
+        guard codexRunning else { return }
+        sendNotification(
+            title: L("Codex'i yeniden başlat", "Restart Codex"),
+            body: L("Hesap değiştirildi. Yeni hesabı kullanmak için Codex'i kapatıp açın.", "Account switched. Quit and reopen Codex to use the new account.")
+        )
     }
 
     // MARK: - Rename
