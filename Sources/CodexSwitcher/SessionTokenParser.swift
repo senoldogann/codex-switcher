@@ -1,7 +1,6 @@
 import Foundation
 
 /// ~/.codex/sessions/ dosyalarını parse ederek hesap başına token kullanımını hesaplar.
-/// Attribution: switch history + activatedAt → hangi session hangi hesaba ait
 final class SessionTokenParser {
 
     private let sessionsDir: URL
@@ -14,86 +13,71 @@ final class SessionTokenParser {
         iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
 
-    /// profiles ve switch history'den hesap bazlı token kullanımını döner.
     func calculate(profiles: [Profile], history: [SwitchEvent]) -> [UUID: AccountTokenUsage] {
-        // Zaman çizelgesi: [(activeFrom, accountId)]
-        // En eskiden en yeniye sırala
-        let timeline = buildTimeline(profiles: profiles, history: history)
-        guard !timeline.isEmpty else { return [:] }
+        let allSessions = collectAllSessions()
+        guard !allSessions.isEmpty else { return [:] }
 
         var result: [UUID: AccountTokenUsage] = [:]
 
-        let fm = FileManager.default
-        guard let yearEnum = fm.enumerator(at: sessionsDir,
-                                           includingPropertiesForKeys: [.isRegularFileKey],
-                                           options: [.skipsHiddenFiles]) else { return [:] }
-
-        for case let fileURL as URL in yearEnum {
-            guard fileURL.pathExtension == "jsonl" else { continue }
-            guard let sessionStart = sessionStartDate(at: fileURL) else { continue }
-            guard let accountId = accountId(for: sessionStart, in: timeline) else { continue }
-
-            let usage = finalTokenUsage(at: fileURL)
-            guard usage.totalTokens > 0 else { continue }
-
-            result[accountId] = (result[accountId] ?? AccountTokenUsage()) + usage
+        if history.isEmpty {
+            // History henüz yok → en son aktivite edilen profile tüm session toplamını göster
+            guard let active = profiles
+                .filter({ $0.activatedAt != nil })
+                .max(by: { $0.activatedAt! < $1.activatedAt! }) else { return [:] }
+            let total = allSessions.reduce(AccountTokenUsage()) { $0 + $1.1 }
+            if total.totalTokens > 0 { result[active.id] = total }
+            return result
         }
 
+        // History varsa → her profil için aktif dönemdeki session'ları attribute et
+        for profile in profiles {
+            guard let activatedAt = profile.activatedAt else { continue }
+
+            // Hesap ne zaman devre dışı bırakıldı (başkası aktive edildi)?
+            let deactivatedAt: Date = history
+                .filter { $0.fromAccountId == profile.id }
+                .map { $0.timestamp }
+                .min() ?? Date()
+
+            var total = AccountTokenUsage()
+            for (startDate, usage) in allSessions where startDate >= activatedAt && startDate <= deactivatedAt {
+                total = total + usage
+            }
+            if total.totalTokens > 0 { result[profile.id] = total }
+        }
         return result
     }
 
     // MARK: - Private
 
-    /// [(activeFrom: Date, accountId: UUID)] en eski → en yeni
-    private func buildTimeline(profiles: [Profile], history: [SwitchEvent]) -> [(Date, UUID)] {
-        var points: [(Date, UUID)] = []
-
-        // Her profil için activatedAt → başlangıç noktası
-        for p in profiles {
-            if let at = p.activatedAt {
-                points.append((at, p.id))
-            }
+    private func collectAllSessions() -> [(Date, AccountTokenUsage)] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(at: sessionsDir,
+                                              includingPropertiesForKeys: [.isRegularFileKey],
+                                              options: [.skipsHiddenFiles]) else { return [] }
+        var results: [(Date, AccountTokenUsage)] = []
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "jsonl" else { continue }
+            guard let start = sessionStartDate(at: url) else { continue }
+            let usage = finalTokenUsage(at: url)
+            guard usage.totalTokens > 0 else { continue }
+            results.append((start, usage))
         }
-
-        // Switch history'deki toAccountId + timestamp
-        for event in history {
-            points.append((event.timestamp, event.toAccountId))
-        }
-
-        // Tekrarlara göre temizle ve sırala
-        let sorted = points.sorted { $0.0 < $1.0 }
-        // Aynı hesabın ardışık tekrarlarını at
-        var deduped: [(Date, UUID)] = []
-        for point in sorted {
-            if deduped.last?.1 != point.1 { deduped.append(point) }
-        }
-        return deduped
+        return results
     }
 
-    /// Belirli bir zaman için hangi hesabın aktif olduğunu bulur
-    private func accountId(for date: Date, in timeline: [(Date, UUID)]) -> UUID? {
-        // date'den önceki son noktayı bul
-        var result: UUID? = nil
-        for (from, id) in timeline {
-            if from <= date { result = id }
-            else { break }
-        }
-        return result
-    }
-
-    /// Session dosyasının ilk event'inin timestamp'ini döner
     private func sessionStartDate(at url: URL) -> Date? {
         guard let handle = FileHandle(forReadingAtPath: url.path) else { return nil }
         defer { try? handle.close() }
-        let data = handle.readData(ofLength: 512)
+        let data = handle.readData(ofLength: 2048)
         guard let text = String(data: data, encoding: .utf8) else { return nil }
-        let firstLine = text.components(separatedBy: "\n").first ?? ""
-        guard let json = try? JSONSerialization.jsonObject(with: Data(firstLine.utf8)) as? [String: Any],
+        let firstLine = text.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? ""
+        guard let jsonData = firstLine.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
               let ts = json["timestamp"] as? String else { return nil }
         return iso8601.date(from: ts)
     }
 
-    /// Dosyadaki son token_count event'inin toplam kullanımını döner (cumulative)
     private func finalTokenUsage(at url: URL) -> AccountTokenUsage {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return AccountTokenUsage() }
         var last = AccountTokenUsage()
@@ -120,7 +104,6 @@ final class SessionTokenParser {
             )
             found = true
         }
-
         return found ? last : AccountTokenUsage()
     }
 }

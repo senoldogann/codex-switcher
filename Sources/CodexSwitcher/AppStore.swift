@@ -52,6 +52,7 @@ final class AppStore: ObservableObject {
         usageMonitor.start()
         startUsagePolling()
         startRateLimitPolling()
+        refreshTokenUsage()
     }
 
     // MARK: - Rate Limit Polling
