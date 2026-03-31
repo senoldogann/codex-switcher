@@ -12,10 +12,13 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 
 - **Auto-switching** — Detects rate limits from session logs and instantly switches to the best available account
 - **Smart selection** — Picks the account with the lowest weekly usage %, not just round-robin
+- **Real-time usage tracking** — Live session activity indicator and per-account token attribution
 - **Cost tracking** — Per-account token usage and USD cost with model-specific pricing (matches CodexBar)
-- **Real-time usage** — Shows weekly and 5-hour (Plus/Pro) rate limit bars per account
-- **Rate limit forecasting** — Estimates time-to-exhaustion based on usage pace
+- **Model-aware pricing** — Accurate costs for gpt-4.x, gpt-5.x, o3, o4-mini with cached token discounts
+- **Rate limit bars** — Weekly and 5-hour (Plus/Pro) rate limit progress bars per account
+- **Rate limit forecasting** — Estimates time-to-exhaustion based on usage pace and historical patterns
 - **Account health indicators** — Per-account status dots: 🟢 healthy, 🟡 stale token, ⚪ unchecked
+- **Live session indicator** — Green pulse when Codex is actively using tokens
 - **Exhaustion UX** — Clear banner when all accounts are rate-limited, with next-reset time and manual override
 - **Restored notifications** — Get notified when a rate-limited account becomes available again
 - **Lock icons** — Visual lock indicator on exhausted accounts
@@ -137,6 +140,30 @@ Each account row shows a colored dot indicating auth health:
 When all accounts are rate-limited, a banner appears with:
 - Which account resets next and when
 - A **"Switch anyway"** button for manual override
+
+---
+
+## Changelog
+
+### v1.5.0
+- **Real-time session indicator** — Live green pulse on the active account when Codex is actively processing
+- **Model-aware cost calculation** — Accurate pricing for gpt-4.x, gpt-5.x, o3, o4-mini including cached token discounts
+- **Improved token attribution** — Sessions are correctly attributed to accounts based on switch history
+- **Live usage updates** — Session file monitoring triggers immediate UI refresh when new tokens are detected
+- **Bug fixes** — Account switching now properly updates both config and auth files
+
+### v1.4.0
+- Per-account token usage and cost tracking
+- Rate limit forecasting with time-to-exhaustion estimates
+- Restored notifications when rate limits reset
+- In-app login flow without Terminal popup
+- Switch verification with automatic rollback
+
+### v1.3.0
+- Smart account selection by weekly usage percentage
+- Account health indicators (healthy, stale, unchecked)
+- Exhaustion state with next-reset info
+- Turkish and English language support
 
 ---
 

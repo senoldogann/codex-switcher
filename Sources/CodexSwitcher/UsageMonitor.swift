@@ -5,6 +5,7 @@ import Foundation
 
     var onRateLimit: (() -> Void)?
     var onTokenUpdate: (() -> Void)?
+    var onSessionActivity: (() -> Void)?  // fires when any session file is modified
 
     private var sessionsDirSource: DispatchSourceFileSystemObject?
     private var fileWatchers: [String: DispatchSourceFileSystemObject] = [:]
@@ -127,8 +128,13 @@ import Foundation
             checkForRateLimit(in: trimmed)
             if trimmed.contains("\"token_count\"") { hasTokenUpdate = true }
         }
-        if hasTokenUpdate {
-            DispatchQueue.main.async { [weak self] in self?.onTokenUpdate?() }
+        
+        // Always signal activity when new data arrives
+        DispatchQueue.main.async { [weak self] in
+            self?.onSessionActivity?()
+            if hasTokenUpdate {
+                self?.onTokenUpdate?()
+            }
         }
     }
 

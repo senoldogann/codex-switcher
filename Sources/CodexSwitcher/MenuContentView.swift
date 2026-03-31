@@ -196,6 +196,7 @@ struct MenuContentView: View {
     private func profileRow(_ profile: Profile) -> some View {
         let isActive = profile.id == store.activeProfile?.id
         let rl = store.rateLimit(for: profile)
+        let usage = store.getTokenUsage(for: profile)
 
         return Button {
             if !isActive { store.switchTo(profile: profile) }
@@ -213,10 +214,19 @@ struct MenuContentView: View {
                             .lineLimit(1)
 
                         if isActive {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 5, height: 5)
-                                .shadow(color: .green, radius: 4)
+                            // Live indicator when session is active
+                            if store.isSessionActive {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                    .shadow(color: .green, radius: 4)
+                                    .opacity(0.8)
+                            } else {
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 5, height: 5)
+                                    .opacity(0.5)
+                            }
                         }
 
                         if let rl = store.rateLimit(for: profile), rl.limitReached {
@@ -243,9 +253,9 @@ struct MenuContentView: View {
                             .frame(height: 12)
                     }
 
-                    // Token usage
-                    if let usage = store.getTokenUsage(for: profile), usage.totalTokens > 0 {
-                        tokenUsageRow(usage)
+                    // Token usage (show for all accounts with usage data)
+                    if let u = usage, u.totalTokens > 0 {
+                        tokenUsageRow(u)
                     }
 
                     // Cost

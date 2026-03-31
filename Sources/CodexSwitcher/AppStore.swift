@@ -24,6 +24,7 @@ final class AppStore: ObservableObject {
     @Published var costs: [UUID: Double] = [:]
     @Published var forecasts: [UUID: RateLimitForecast] = [:]
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
+    @Published var isSessionActive: Bool = false  // live session indicator
 
     static let turnsLimit = 50
     static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)
@@ -63,6 +64,15 @@ final class AppStore: ObservableObject {
         }
         usageMonitor.onTokenUpdate = { [weak self] in
             self?.refreshTokenUsage()
+        }
+        usageMonitor.onSessionActivity = { [weak self] in
+            Task { @MainActor in
+                self?.isSessionActive = true
+                // Reset after 5 seconds of no activity
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    self?.isSessionActive = false
+                }
+            }
         }
         usageMonitor.start()
         startUsagePolling()
