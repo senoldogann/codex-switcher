@@ -1,19 +1,22 @@
-.DS_Store
+# Build artifacts
 .build/
-*.o
-*.d
-CodexSwitcher.app
-*.xcworkspace
-*.xcodeproj
-.swiftpm/
+*.build/
+DerivedData/
 
-# ECC plugin files (not part of the app)
-.opencode/
-skills/
-AGENTS.md
+# Release zips (these go to GitHub Releases, not git repo)
+*.zip
+CodexSwitcher.app/
 
-# Spec/plan docs (local development artifacts)
-docs/
+# macOS
+.DS_Store
+*.swp
+*~
 
-# Token usage cache
-~/.codex-switcher/cache/
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/default.xcscheme
+
+# Swift Package Manager
+Package.resolved
+Package.repos
