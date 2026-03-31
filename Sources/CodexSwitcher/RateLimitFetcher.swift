@@ -46,7 +46,7 @@ struct RateLimitInfo {
     }
 }
 
-enum FetchResult {
+enum FetchResult: Sendable {
     case success(RateLimitInfo)
     case stale
     case failure
@@ -77,6 +77,7 @@ final class RateLimitFetcher: @unchecked Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            print("[RateLimit] fetch error for \(credentials.accountId): \(error)")
             return .failure
         }
 
