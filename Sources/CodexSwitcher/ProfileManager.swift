@@ -176,18 +176,25 @@ final class ProfileManager: @unchecked Sendable {
 
         // Backup current auth.json
         if FileManager.default.fileExists(atPath: Self.codexAuthPath.path) {
-            try? FileManager.default.copyItem(
-                at: Self.codexAuthPath,
-                to: Self.authBackupPath
-            )
+            do {
+                try FileManager.default.copyItem(at: Self.codexAuthPath, to: Self.authBackupPath)
+            } catch {
+                print("[AuthBackup] backup failed: \(error)")
+            }
         }
 
         // Atomic write
         let tmp = Self.codexAuthPath.deletingLastPathComponent()
             .appendingPathComponent(".auth_tmp_\(UUID().uuidString).json")
-        try newData.write(to: tmp, options: .atomic)
-        guard (try? FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: tmp)) != nil else {
-            throw SwitcherError.activationFailed(profile.email)
+        do {
+            try newData.write(to: tmp, options: [])
+            guard try FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: tmp) != nil else {
+                try? FileManager.default.removeItem(at: tmp) // clean up leaked temp
+                throw SwitcherError.activationFailed(profile.email)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tmp) // clean up leaked temp
+            throw error
         }
 
         // Verify
@@ -195,10 +202,11 @@ final class ProfileManager: @unchecked Sendable {
         if case .failed = verifyResult {
             // Rollback from backup
             if FileManager.default.fileExists(atPath: Self.authBackupPath.path) {
-                try? FileManager.default.replaceItemAt(
-                    Self.codexAuthPath,
-                    withItemAt: Self.authBackupPath
-                )
+                do {
+                    try FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: Self.authBackupPath)
+                } catch {
+                    print("[AuthRollback] rollback failed: \(error)")
+                }
             }
         } else {
             // Success — clean up backup
