@@ -54,4 +54,6 @@ enum Str {
     static var showEmail:    String { L("Göster",             "Show") }
     static var langAuto:     String { L("Oto",                "Auto") }
     static var back:         String { L("Geri",              "Back") }
+    static var limitReset:   String { L("Limit sıfırlandı", "Limit reset") }
+    static var readyToUse:   String { L("kullanıma hazır", "is ready to use again") }
 }

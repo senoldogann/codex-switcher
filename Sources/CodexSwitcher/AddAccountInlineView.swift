@@ -1,10 +1,12 @@
 import SwiftUI
 
 /// Inline version of AddAccountView — fits inside the popover, no separate window.
+/// Liquid glass style with animated step transitions.
 struct AddAccountInlineView: View {
     @EnvironmentObject var store: AppStore
     @State private var aliasText = ""
     @FocusState private var aliasFocused: Bool
+    @State private var pulsePhase: CGFloat = 0
 
     @AppStorage("isDarkMode")  private var isDarkMode: Bool = true
     @AppStorage("appLanguage") private var appLanguage: String = "system"
@@ -23,14 +25,29 @@ struct AddAccountInlineView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 16)
-        .animation(.easeInOut(duration: 0.2), value: store.addingStep)
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.addingStep)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                pulsePhase = 1
+            }
+        }
     }
 
     // MARK: - Idle
 
     private var idleView: some View {
-        VStack(spacing: 16) {
-            iconCircle(systemName: "person.badge.plus", color: gw.opacity(0.12))
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(gw.opacity(0.04))
+                    .frame(width: 52, height: 52)
+                Circle()
+                    .stroke(gw.opacity(0.08), lineWidth: 1)
+                    .frame(width: 52, height: 52)
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(gw.opacity(0.6))
+            }
 
             VStack(spacing: 4) {
                 Text(Str.newAccount)
@@ -61,13 +78,28 @@ struct AddAccountInlineView: View {
     // MARK: - Waiting
 
     private var waitingView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             ZStack {
+                // Outer pulse ring
+                Circle()
+                    .stroke(gw.opacity(0.06), lineWidth: 2)
+                    .frame(width: 52 + pulsePhase * 20, height: 52 + pulsePhase * 20)
+                    .opacity(1 - pulsePhase * 0.8)
+
+                // Inner glass circle
                 Circle()
                     .fill(gw.opacity(0.06))
-                    .frame(width: 44, height: 44)
-                ProgressView()
-                    .tint(gw.opacity(0.6))
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle()
+                            .stroke(gw.opacity(0.1), lineWidth: 0.5)
+                    )
+
+                // Animated browser icon
+                Image(systemName: "globe")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(gw.opacity(0.6))
+                    .scaleEffect(1 + pulsePhase * 0.1)
             }
 
             VStack(spacing: 4) {
@@ -81,14 +113,46 @@ struct AddAccountInlineView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
             }
+
+            // Step indicator dots
+            HStack(spacing: 6) {
+                ForEach(0..<3) { i in
+                    Circle()
+                        .fill(gw.opacity(i == 0 ? 0.6 : 0.15))
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .padding(.top, 4)
+
+            // Cancel button
+            Button(Str.cancel) { store.cancelAddAccount() }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(gw.opacity(0.4))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(gw.opacity(0.05), in: .capsule)
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .padding(.top, 4)
         }
     }
 
     // MARK: - Confirm
 
     private var confirmView: some View {
-        VStack(spacing: 16) {
-            iconCircle(systemName: "checkmark", color: Color.green.opacity(0.2))
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.15))
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+                Image(systemName: "checkmark")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color.green.opacity(0.8))
+            }
 
             VStack(spacing: 4) {
                 Text(Str.detected)
@@ -142,8 +206,19 @@ struct AddAccountInlineView: View {
     // MARK: - Done
 
     private var doneView: some View {
-        VStack(spacing: 16) {
-            iconCircle(systemName: "checkmark.seal.fill", color: Color.green.opacity(0.2))
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.15))
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(Color.green.opacity(0.8))
+            }
 
             Text(Str.added)
                 .font(.system(size: 14, weight: .semibold))
@@ -154,21 +229,6 @@ struct AddAccountInlineView: View {
     }
 
     // MARK: - Helpers
-
-    private func iconCircle(systemName: String, color: Color) -> some View {
-        ZStack {
-            Circle()
-                .fill(color)
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Circle()
-                        .stroke(gw.opacity(0.1), lineWidth: 0.5)
-                )
-            Image(systemName: systemName)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(gw.opacity(0.7))
-        }
-    }
 
     private func glassButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -184,5 +244,6 @@ struct AddAccountInlineView: View {
                 )
         }
         .buttonStyle(.plain)
+        .pointerCursor()
     }
 }

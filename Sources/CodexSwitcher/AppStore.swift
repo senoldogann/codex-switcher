@@ -21,6 +21,9 @@ final class AppStore: ObservableObject {
     @Published var switchHistory: [SwitchEvent] = []
     @Published var tokenUsage: [UUID: AccountTokenUsage] = [:]
     @Published var staleProfileIds: Set<UUID> = []
+    @Published var costs: [UUID: Double] = [:]
+    @Published var forecasts: [UUID: RateLimitForecast] = [:]
+    @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
 
     static let turnsLimit = 50
     static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)
@@ -35,8 +38,11 @@ final class AppStore: ObservableObject {
     private var rateLimitTimer: Timer?
     private var authWatcher: DispatchSourceFileSystemObject?
     private var authWatcherFd: Int32 = -1
+    private var loginTimeout: DispatchWorkItem?
     private var lastAutoSwitchDate: Date?
     private var lastAuthWriteDate: Date?
+    private var consecutiveFetchFailures: Int = 0
+    private var paceHistory: [SessionPacePoint] = []
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -98,19 +104,42 @@ final class AppStore: ObservableObject {
         }
 
         var newStale: Set<UUID> = []
+        var successCount = 0
         for (id, result) in results {
             switch result {
             case .success(let info):
                 rateLimits[id] = info
+                successCount += 1
+                // Restored notification
+                if lastKnownLimitState[id] == true, info.limitReached == false {
+                    sendNotification(
+                        title: L("Limit sıfırlandı", "Limit reset"),
+                        body: L("\(profiles.first(where: { $0.id == id })?.displayName ?? "Hesap") kullanıma hazır", "Account is ready to use again")
+                    )
+                }
+                lastKnownLimitState[id] = info.limitReached
             case .stale:
                 newStale.insert(id)
             case .failure:
-                break // keep existing rateLimits entry if any
+                break
             }
         }
+
+        // Consecutive failure gating
+        if successCount == 0 && !credPairs.isEmpty {
+            consecutiveFetchFailures += 1
+            if consecutiveFetchFailures >= 3 {
+                // Back off: skip next few polls
+                return
+            }
+        } else {
+            consecutiveFetchFailures = 0
+        }
+
         staleProfileIds = newStale
         NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
         refreshTokenUsage()
+        updateCostsAndForecasts()
     }
 
     func refreshTokenUsage() {
@@ -119,7 +148,40 @@ final class AppStore: ObservableObject {
         let parser   = self.tokenParser
         DispatchQueue.global(qos: .utility).async {
             let result = parser.calculate(profiles: profiles, history: history)
-            DispatchQueue.main.async { self.tokenUsage = result }
+            DispatchQueue.main.async {
+                self.tokenUsage = result
+                self.updateCostsAndForecasts()
+            }
+        }
+    }
+
+    private func updateCostsAndForecasts() {
+        let calculator = CostCalculator()
+        var newCosts: [UUID: Double] = [:]
+        var newForecasts: [UUID: RateLimitForecast] = [:]
+
+        for profile in profiles {
+            if let usage = tokenUsage[profile.id] {
+                newCosts[profile.id] = calculator.cost(for: usage)
+            }
+            newForecasts[profile.id] = RateLimitForecaster.forecast(
+                profileId: profile.id,
+                rateLimit: rateLimits[profile.id],
+                tokenUsage: tokenUsage[profile.id],
+                sessionHistory: paceHistory
+            )
+        }
+
+        costs = newCosts
+        forecasts = newForecasts
+
+        // Update pace history
+        let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
+        if totalTokens > 0 {
+            paceHistory.append(SessionPacePoint(timestamp: Date(), cumulativeTokens: totalTokens))
+            // Keep last 24 hours of data points
+            let cutoff = Date().addingTimeInterval(-24 * 3600)
+            paceHistory.removeAll { $0.timestamp < cutoff }
         }
     }
 
@@ -407,6 +469,27 @@ final class AppStore: ObservableObject {
         addingStep = .waitingLogin
         openTerminalWithCodexLogin()
         watchAuthFileForNewLogin()
+
+        // 120 saniye timeout — login tamamlanmazsa otomatik iptal
+        cancelLoginTimeout()
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.loginTimedOut()
+        }
+        loginTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeout)
+    }
+
+    private func cancelLoginTimeout() {
+        loginTimeout?.cancel()
+        loginTimeout = nil
+    }
+
+    private func loginTimedOut() {
+        guard addingStep == .waitingLogin else { return }
+        cancelLoginTimeout()
+        addingStep = .idle
+        isAddingAccount = false
+        stopAuthWatcher()
     }
 
     func confirmPendingProfile(alias: String) {
@@ -436,6 +519,7 @@ final class AppStore: ObservableObject {
     }
 
     func cancelAddAccount() {
+        cancelLoginTimeout()
         isAddingAccount = false
         addingStep = .idle
         pendingProfileEmail = ""
@@ -510,14 +594,11 @@ final class AppStore: ObservableObject {
     // MARK: - Helpers
 
     private func openTerminalWithCodexLogin() {
-        let script = """
-        tell application "Terminal"
-            do script "echo '=== Codex Switcher: Yeni hesap ===' && codex login"
-            activate
-        end tell
-        """
-        var err: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&err)
+        // Terminal acmak yerine dogrudan browser'da login sayfasini ac
+        // codex login komutu da zaten sadece browser aciyor
+        if let url = URL(string: "https://chatgpt.com/?login=1") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func notifyProfileChanged() {

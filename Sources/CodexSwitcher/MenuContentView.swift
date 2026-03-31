@@ -247,6 +247,36 @@ struct MenuContentView: View {
                     if let usage = store.getTokenUsage(for: profile), usage.totalTokens > 0 {
                         tokenUsageRow(usage)
                     }
+
+                    // Cost
+                    if let cost = store.costs[profile.id], cost > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(gw.opacity(0.3))
+                            Text(CostCalculator.format(cost))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(gw.opacity(0.35))
+                        }
+                    }
+
+                    // Risk forecast
+                    if let forecast = store.forecasts[profile.id],
+                       forecast.riskLevel != .safe && forecast.riskLevel != .exhausted {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color(forecast.riskLevel.color))
+                                .frame(width: 6, height: 6)
+                            Text(forecast.riskLevel.label)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(gw.opacity(0.35))
+                            if !forecast.timeToExhaustionLabel.isEmpty {
+                                Text(forecast.timeToExhaustionLabel)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(gw.opacity(0.3))
+                            }
+                        }
+                    }
                 }
 
                 Spacer(minLength: 0)
