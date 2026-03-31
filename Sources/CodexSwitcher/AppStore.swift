@@ -378,16 +378,23 @@ final class AppStore: ObservableObject {
     // MARK: - Codex Restart
 
     private func restartCodexIfRunning() {
-        // Codex'i otomatik restart ETME — aktif stream'i koparır
-        // "stream disconnected before completion" hatasına sebep olur.
-        // Sadece kullanıcıya bildirim gönder, bir sonraki istekte yeni auth kullanılır.
         let codexRunning = NSWorkspace.shared.runningApplications.contains {
             $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }
         guard codexRunning else { return }
+
+        // Quit Codex so it restarts with the new account's auth
+        let script = NSAppleScript(source: "tell application \"Codex\" to quit")
+        var error: NSDictionary?
+        script?.executeAndReturnError(&error)
+
+        if let error = error {
+            print("Failed to quit Codex: \(error)")
+        }
+
         sendNotification(
-            title: L("Codex'i yeniden başlat", "Restart Codex"),
-            body: L("Hesap değiştirildi. Yeni hesabı kullanmak için Codex'i kapatıp açın.", "Account switched. Quit and reopen Codex to use the new account.")
+            title: L("Hesap değiştirildi", "Account Switched"),
+            body: L("Codex yeniden başlatılıyor. Yeni hesap aktif.", "Codex is restarting. New account is now active.")
         )
     }
 

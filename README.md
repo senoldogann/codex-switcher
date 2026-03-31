@@ -145,6 +145,13 @@ When all accounts are rate-limited, a banner appears with:
 
 ## Changelog
 
+### v1.5.2
+- **Codex auto-restart** — Codex now automatically quits when switching accounts, ensuring the new account's session is used immediately (restored previous behavior)
+
+### v1.5.1
+- **Race condition fix** — Prevents token/cost data from appearing on wrong accounts during rapid switches
+- **Auth file sync** — Fixed auth.json mismatch after account switches
+
 ### v1.5.0
 - **Real-time session indicator** — Live green pulse on the active account when Codex is actively processing
 - **Model-aware cost calculation** — Accurate pricing for gpt-4.x, gpt-5.x, o3, o4-mini including cached token discounts
