@@ -12,12 +12,16 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 
 - **Auto-switching** — Detects rate limits from session logs and instantly switches to the best available account
 - **Smart selection** — Picks the account with the lowest weekly usage %, not just round-robin
+- **Cost tracking** — Per-account token usage and USD cost with model-specific pricing (matches CodexBar)
 - **Real-time usage** — Shows weekly and 5-hour (Plus/Pro) rate limit bars per account
+- **Rate limit forecasting** — Estimates time-to-exhaustion based on usage pace
 - **Account health indicators** — Per-account status dots: 🟢 healthy, 🟡 stale token, ⚪ unchecked
 - **Exhaustion UX** — Clear banner when all accounts are rate-limited, with next-reset time and manual override
+- **Restored notifications** — Get notified when a rate-limited account becomes available again
 - **Lock icons** — Visual lock indicator on exhausted accounts
 - **Auth recovery** — Automatic recovery if `~/.codex/auth.json` is corrupted or deleted
 - **Switch verification** — Post-switch confirmation that the correct account is active, with automatic rollback on failure
+- **In-app login** — Add accounts without Terminal popup; secure browser-based login flow
 - **Email privacy** — One-click blur toggle to hide email addresses
 - **Dark / Light mode** — Persistent appearance preference
 - **TR / EN language** — Turkish and English UI support (auto-detects system language)
@@ -97,7 +101,7 @@ To launch at login: **System Settings → General → Login Items** → add `Cod
 ## Adding Accounts
 
 1. Click the menu bar icon → **Add Account** (`+`)
-2. A Terminal window opens and runs `codex login`
+2. Browser opens automatically for sign-in (no Terminal popup)
 3. Sign in with your account in the browser
 4. CodexSwitcher detects the new credentials automatically
 5. Optionally give the account an alias, then click **Save**
@@ -140,13 +144,15 @@ When all accounts are rate-limited, a banner appears with:
 
 | File | Responsibility |
 |------|---------------|
-| `AppStore.swift` | Central state management, profile CRUD, smart switching |
+| `AppStore.swift` | Central state management, profile CRUD, smart switching, rate limit polling |
 | `ProfileManager.swift` | Auth file management, verification, backup/rollback |
 | `RateLimitFetcher.swift` | API polling for rate limit data |
+| `RateLimitForecaster.swift` | Usage pace analysis and exhaustion prediction |
+| `CostCalculator.swift` | USD cost calculation with model-specific pricing |
 | `UsageMonitor.swift` | FSEvents-based session log watcher |
-| `SessionTokenParser.swift` | Per-account token usage calculation with file caching |
+| `SessionTokenParser.swift` | Per-account token usage with model tracking and file caching |
 | `MenuContentView.swift` | Popover UI with inline navigation |
-| `AddAccountInlineView.swift` | Inline account addition flow |
+| `AddAccountInlineView.swift` | Inline account addition with browser-based login |
 | `L10n.swift` | TR/EN localization system |
 
 ---
