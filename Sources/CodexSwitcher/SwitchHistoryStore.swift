@@ -4,7 +4,7 @@ import Foundation
 final class SwitchHistoryStore {
 
     private let url: URL
-    private let maxEvents = 50
+    private let maxEvents = 500
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 

@@ -189,24 +189,36 @@ final class SessionTokenParser: @unchecked Sendable {
     }
 
     private func parseDateFromFilename(_ name: String) -> Date? {
-        // "2026-03-31T02-50-56.jsonl" veya "2026-03-31T025056.jsonl" formatları
         let base = (name as NSString).deletingPathExtension
-        // T ve -/_ karakterlerini normalize et
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "UTC")
+
+        // "rollout-2026-03-18T21-57-46-UUID" ve "YYYY-MM-DDThh-mm-ss" formatları:
+        // Filename içinde YYYY-MM-DDThh-mm-ss kalıbını regex ile bul
+        if let tsRange = base.range(of: #"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}"#, options: .regularExpression) {
+            let ts = String(base[tsRange]) // "2026-03-18T21-57-46"
+            let datePart = String(ts.prefix(10))        // "2026-03-18"
+            let timePart = String(ts.dropFirst(11))     // "21-57-46"
+            let normalized = datePart + " " + timePart.replacingOccurrences(of: "-", with: ":")
+            df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            if let d = df.date(from: normalized) { return d }
+        }
+
+        // "YYYY-MM-DDTHHmmss" formatı (eski stil, bölme karaktersiz zaman)
         let normalized = base
             .replacingOccurrences(of: "T", with: " ")
             .replacingOccurrences(of: "-", with: ":", range: base.range(of: "\\d{2}[-_]\\d{2}[-_]\\d{2}", options: .regularExpression) ?? nil)
             .replacingOccurrences(of: "_", with: ":")
-        // "2026-03-31 02:50:56" formatını dene
-        let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone(identifier: "UTC")
         if let d = df.date(from: normalized) { return d }
-        // Sadece tarih kısmı
-        let dateOnly = String(name.prefix(10))
-        guard dateOnly.count == 10, dateOnly.contains("-") else { return nil }
-        df.dateFormat = "yyyy-MM-dd"
-        return df.date(from: dateOnly)
+
+        // Sadece tarih kısmını filename içinde bul (YYYY-MM-DD)
+        if let dateRange = base.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression) {
+            df.dateFormat = "yyyy-MM-dd"
+            return df.date(from: String(base[dateRange]))
+        }
+        return nil
     }
 
     // MARK: - Session Parsing

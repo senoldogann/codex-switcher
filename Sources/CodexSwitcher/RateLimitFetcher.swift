@@ -108,23 +108,54 @@ final class RateLimitFetcher: @unchecked Sendable {
         let pw = rl["primary_window"]   as? [String: Any]
         let sw = rl["secondary_window"] as? [String: Any]
 
-        if let sw {
-            // Plus/Pro: secondary_window = haftalık (used %)
-            info.weeklyUsedPercent = intVal(sw["used_percent"])
-            info.weeklyResetAt     = dateVal(sw["reset_at"])
+        // Pencereleri limit_window_seconds'a göre sınıflandır (CodexBar yaklaşımı)
+        // 18000s = 5 saat (session penceresi), 604800s = 7 gün (haftalık pencere)
+        // Bu sayede API primary/secondary sıralaması değişse bile doğru çalışır
+        let fiveHourMaxSec = 21600  // 6 saat — 5h window için üst eşik
 
-            // primary_window = 5 saatlik → Codex IDE gibi KALAN (remaining) göster
-            if let pw, let used = intVal(pw["used_percent"]) {
-                info.fiveHourRemainingPercent = max(0, 100 - used)
-                info.fiveHourResetAt          = dateVal(pw["reset_at"])
-            }
-        } else if let pw {
-            // Free: sadece primary_window var = haftalık (used %)
-            info.weeklyUsedPercent = intVal(pw["used_percent"])
-            info.weeklyResetAt     = dateVal(pw["reset_at"])
+        let (fiveHourWindow, weeklyWindow) = classifyWindows(pw: pw, sw: sw, fiveHourMaxSec: fiveHourMaxSec)
+
+        if let w = weeklyWindow {
+            info.weeklyUsedPercent = intVal(w["used_percent"])
+            info.weeklyResetAt     = dateVal(w["reset_at"])
+        }
+
+        if let h = fiveHourWindow, let used = intVal(h["used_percent"]) {
+            info.fiveHourRemainingPercent = max(0, 100 - used)
+            info.fiveHourResetAt          = dateVal(h["reset_at"])
         }
 
         return info
+    }
+
+    /// limit_window_seconds değerine bakarak hangi pencere 5h, hangisi haftalık olduğunu belirler.
+    private func classifyWindows(
+        pw: [String: Any]?,
+        sw: [String: Any]?,
+        fiveHourMaxSec: Int
+    ) -> (fiveHour: [String: Any]?, weekly: [String: Any]?) {
+        guard let pw = pw else {
+            // Sadece secondary varsa
+            guard let sw = sw else { return (nil, nil) }
+            let sec = intVal(sw["limit_window_seconds"]) ?? 0
+            return sec <= fiveHourMaxSec ? (sw, nil) : (nil, sw)
+        }
+        guard let sw = sw else {
+            // Sadece primary varsa
+            let sec = intVal(pw["limit_window_seconds"]) ?? 0
+            return sec <= fiveHourMaxSec ? (pw, nil) : (nil, pw)
+        }
+        // Her ikisi de var — duration'a göre ayırt et
+        let pwSec = intVal(pw["limit_window_seconds"]) ?? 0
+        let swSec = intVal(sw["limit_window_seconds"]) ?? 0
+        if pwSec <= fiveHourMaxSec && swSec > fiveHourMaxSec {
+            return (pw, sw)
+        } else if swSec <= fiveHourMaxSec && pwSec > fiveHourMaxSec {
+            return (sw, pw)
+        } else {
+            // Duration'dan ayırt edilemiyorsa: position'a göre (varsayılan davranış)
+            return (pw, sw)
+        }
     }
 
     /// JSON sayısı Int veya Double olabilir.

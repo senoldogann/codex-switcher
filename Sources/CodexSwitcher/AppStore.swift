@@ -83,7 +83,9 @@ final class AppStore: ObservableObject {
     // MARK: - Rate Limit Polling
 
     private func startRateLimitPolling() {
-        // İlk fetch popover açılınca yapılır; sonra her 5 dakikada sessizce güncelle
+        // İlk fetch hemen yap (status bar'ın veri göstermesi için)
+        Task { await fetchAllRateLimits(showSpinner: false) }
+        // Sonra her 60 saniyede sessizce güncelle
         rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.fetchAllRateLimits(showSpinner: false) }
         }
@@ -97,8 +99,17 @@ final class AppStore: ObservableObject {
 
         let fetcher = self.fetcher
 
+        let activeProfileId = activeProfile?.id
         let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
-            guard let dict = profileManager.readAuthDict(for: profile),
+            // Aktif hesap için her zaman live ~/.codex/auth.json'u kullan (en güncel token)
+            let dict: [String: Any]?
+            if profile.id == activeProfileId,
+               let liveDict = profileManager.readLiveAuthDict() {
+                dict = liveDict
+            } else {
+                dict = profileManager.readAuthDict(for: profile)
+            }
+            guard let dict = dict,
                   let creds = fetcher.credentials(from: dict) else { return nil }
             return (profile.id, creds)
         }

@@ -139,6 +139,12 @@ final class ProfileManager: @unchecked Sendable {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    /// Aktif hesabın live auth dosyasını (~/.codex/auth.json) döner (her zaman en güncel token)
+    func readLiveAuthDict() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: Self.codexAuthPath) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
     /// Mevcut ~/.codex/auth.json'u okuyup yeni profil olarak kaydeder
     func captureCurrentAuth(alias: String) -> Profile? {
         guard let data = try? Data(contentsOf: Self.codexAuthPath),
