@@ -23,12 +23,62 @@ final class ProfileManager: @unchecked Sendable {
             .appendingPathComponent(".codex/auth.json")
     }()
 
+    static let authBackupPath: URL = {
+        switcherDir.appendingPathComponent("auth-backup.json")
+    }()
+
     // MARK: - Bootstrap
 
     func bootstrap() {
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.switcherDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: Self.profilesDir, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Auth Recovery
+
+    /// Verify auth.json on boot and recover if broken. Must run BEFORE loadProfiles().
+    func verifyAndRecoverActiveAuth() -> AuthVerificationResult {
+        if FileManager.default.fileExists(atPath: Self.authBackupPath.path) {
+            try? FileManager.default.removeItem(at: Self.authBackupPath)
+        }
+
+        let config = loadConfig()
+        guard let activeId = config.activeProfileId,
+              let activeProfile = config.profiles.first(where: { $0.id == activeId }) else {
+            return .valid
+        }
+
+        if isValidAuthFile(at: Self.codexAuthPath, expectedAccountId: activeProfile.accountId) {
+            return .valid
+        }
+
+        let profileAuthPath = authPath(for: activeProfile)
+        if FileManager.default.fileExists(atPath: profileAuthPath.path),
+           let data = try? Data(contentsOf: profileAuthPath),
+           isValidAuthData(data) {
+            try? data.write(to: Self.codexAuthPath, options: .atomic)
+            return .recovered
+        }
+
+        return .unrecoverable
+    }
+
+    private func isValidAuthFile(at url: URL, expectedAccountId: String) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              isValidAuthData(data) else { return false }
+        guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = dict["tokens"] as? [String: Any],
+              let accessToken = tokens["access_token"] as? String else { return false }
+        let actualId = extractAccountId(from: accessToken)
+        return actualId == expectedAccountId
+    }
+
+    private func isValidAuthData(_ data: Data) -> Bool {
+        guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = dict["tokens"] as? [String: Any],
+              tokens["access_token"] as? String != nil else { return false }
+        return true
     }
 
     // MARK: - Config I/O
@@ -155,4 +205,10 @@ enum SwitcherError: LocalizedError {
             return "Tüm hesapların limiti doldu!"
         }
     }
+}
+
+enum AuthVerificationResult {
+    case valid
+    case recovered
+    case unrecoverable
 }
