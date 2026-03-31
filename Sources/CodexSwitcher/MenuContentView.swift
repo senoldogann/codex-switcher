@@ -85,9 +85,10 @@ struct MenuContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: store.allExhausted ? 360 : 420)
             }
         }
+        .frame(minHeight: 300)
+        .frame(maxHeight: store.allExhausted ? 360 : 420)
     }
 
     private var exhaustionBanner: some View {
@@ -150,6 +151,7 @@ struct MenuContentView: View {
 
     private var addAccountContent: some View {
         AddAccountInlineView().environmentObject(store)
+            .frame(minHeight: 300)
     }
 
     // MARK: - Empty

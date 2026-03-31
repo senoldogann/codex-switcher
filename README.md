@@ -13,12 +13,19 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 - **Auto-switching** — Detects rate limits from session logs and instantly switches to the best available account
 - **Smart selection** — Picks the account with the lowest weekly usage %, not just round-robin
 - **Real-time usage** — Shows weekly and 5-hour (Plus/Pro) rate limit bars per account
+- **Account health indicators** — Per-account status dots: 🟢 healthy, 🟡 stale token, ⚪ unchecked
+- **Exhaustion UX** — Clear banner when all accounts are rate-limited, with next-reset time and manual override
+- **Lock icons** — Visual lock indicator on exhausted accounts
+- **Auth recovery** — Automatic recovery if `~/.codex/auth.json` is corrupted or deleted
+- **Switch verification** — Post-switch confirmation that the correct account is active, with automatic rollback on failure
 - **Email privacy** — One-click blur toggle to hide email addresses
 - **Dark / Light mode** — Persistent appearance preference
 - **TR / EN language** — Turkish and English UI support (auto-detects system language)
 - **Account aliases** — Give each account a friendly name; rename anytime via right-click
+- **Switch history** — Track all account switches with reasons and timestamps
 - **Liquid glass UI** — Native macOS frosted-glass popover design
 - **Zero dependencies** — Pure Swift, no external packages
+- **CPU optimized** — File modification time caching to avoid re-parsing unchanged session files
 
 ---
 
@@ -83,6 +90,7 @@ To launch at login: **System Settings → General → Login Items** → add `Cod
 1. CodexSwitcher watches `~/.codex/sessions/` for rate-limit events (`429`, `rate_limit`, `quota_exceeded`)
 2. On detection it atomically replaces `~/.codex/auth.json` with the best available account
 3. Rate-limit data is fetched from the Codex API for all accounts on each popover open
+4. After switching, the new auth is verified — if verification fails, automatic rollback occurs
 
 ---
 
@@ -107,6 +115,39 @@ To launch at login: **System Settings → General → Login Items** → add `Cod
 | Blur/show emails | Settings bar → 👁 icon |
 | Toggle dark/light | Settings bar → 🌙/☀️ icon |
 | Change language | Settings bar → 🌐 icon (cycles Auto → TR → EN) |
+| View switch history | Click **History** in the footer |
+
+### Health Indicators
+
+Each account row shows a colored dot indicating auth health:
+
+| Indicator | Meaning |
+|-----------|---------|
+| 🟢 Green | Healthy — API responding, auth valid |
+| 🟡 Yellow | Stale — Token expired (401/403), re-login needed |
+| ⚪ Gray | Unknown — Not yet checked or network error |
+| 🔒 Red lock | Exhausted — Rate limit reached |
+
+### Exhaustion State
+
+When all accounts are rate-limited, a banner appears with:
+- Which account resets next and when
+- A **"Switch anyway"** button for manual override
+
+---
+
+## Architecture
+
+| File | Responsibility |
+|------|---------------|
+| `AppStore.swift` | Central state management, profile CRUD, smart switching |
+| `ProfileManager.swift` | Auth file management, verification, backup/rollback |
+| `RateLimitFetcher.swift` | API polling for rate limit data |
+| `UsageMonitor.swift` | FSEvents-based session log watcher |
+| `SessionTokenParser.swift` | Per-account token usage calculation with file caching |
+| `MenuContentView.swift` | Popover UI with inline navigation |
+| `AddAccountInlineView.swift` | Inline account addition flow |
+| `L10n.swift` | TR/EN localization system |
 
 ---
 

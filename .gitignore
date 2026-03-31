@@ -6,3 +6,14 @@ CodexSwitcher.app
 *.xcworkspace
 *.xcodeproj
 .swiftpm/
+
+# ECC plugin files (not part of the app)
+.opencode/
+skills/
+AGENTS.md
+
+# Spec/plan docs (local development artifacts)
+docs/
+
+# Token usage cache
+~/.codex-switcher/cache/
