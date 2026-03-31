@@ -15,6 +15,10 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
 cp "${BUILD_DIR}/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
 cp "Info.plist" "${APP_BUNDLE}/Contents/"
+cp "Sources/CodexSwitcher/Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/"
+
+# Ad-hoc sign — Gatekeeper "damaged" hatasını önler
+codesign --force --deep --sign - "${APP_BUNDLE}"
 
 echo "► Build tamamlandı: ${APP_BUNDLE}"
 echo ""
