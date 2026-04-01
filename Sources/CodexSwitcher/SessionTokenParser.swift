@@ -33,7 +33,7 @@ final class SessionTokenParser: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         cacheDir = base.appendingPathComponent("cache")
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        deltaCacheURL = cacheDir.appendingPathComponent("event-deltas.json")
+        deltaCacheURL = cacheDir.appendingPathComponent("event-deltas-v2.json")
         modTimeCacheURL = cacheDir.appendingPathComponent("token-usage.json.mod")
     }
 
@@ -64,7 +64,7 @@ final class SessionTokenParser: @unchecked Sendable {
 
             let prev = prevModTimes[url.path]
             if prev == nil || prev != modDate {
-                let deltas = parseEventDeltas(at: url)
+                let deltas = parseEventDeltas(at: url, windowStart: windowStart)
                 if deltas.isEmpty {
                     deltaCache.removeValue(forKey: url.path)
                 } else {
@@ -163,17 +163,21 @@ final class SessionTokenParser: @unchecked Sendable {
     private func findActiveProfile(at date: Date, profiles: [Profile], history: [SwitchEvent]) -> UUID? {
         let relevantSwitches = history.filter { $0.timestamp <= date }
         guard let lastSwitch = relevantSwitches.max(by: { $0.timestamp < $1.timestamp }) else {
-            return profiles
-                .filter { $0.activatedAt != nil }
-                .min(by: { $0.activatedAt! < $1.activatedAt! })?
-                .id
+            // No switch event recorded before this timestamp — don't guess.
+            // Returning nil means tokens from before tracking starts are unattributed
+            // (better than wrongly dumping them on whichever account happened to be "first").
+            return nil
         }
         return lastSwitch.toAccountId
     }
 
     // MARK: - Session Parsing (CodexBar yaklaşımı: delta hesaplama)
 
-    private func parseEventDeltas(at url: URL) -> [SessionEventDelta] {
+    /// windowStart: all events are parsed (to build correct cumulative baseline),
+    /// but only events AFTER windowStart are emitted as deltas.
+    /// This prevents sessions that started before the window from counting all
+    /// historical tokens as a single large delta on the first in-window event.
+    private func parseEventDeltas(at url: URL, windowStart: Date) -> [SessionEventDelta] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
 
         var deltas: [SessionEventDelta] = []
@@ -223,7 +227,9 @@ final class SessionTokenParser: @unchecked Sendable {
             func toInt(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? 0 }
 
             if let total = info["total_token_usage"] as? [String: Any] {
-                // Kümülatif total'den delta hesapla (CodexBar yaklaşımı)
+                // Kümülatif total'den delta hesapla (CodexBar yaklaşımı).
+                // prevInput her event için güncellenir (pencere öncesi eventler dahil)
+                // böylece pencere başlangıcındaki baseline doğru hesaplanır.
                 let curInput  = toInt(total["input_tokens"])
                 let curCached = toInt(total["cached_input_tokens"] ?? total["cache_read_input_tokens"])
                 let curOutput = toInt(total["output_tokens"])
@@ -236,6 +242,9 @@ final class SessionTokenParser: @unchecked Sendable {
                 prevCached = curCached
                 prevOutput = curOutput
 
+                // Pencere dışındaki event'leri baseline için kullan ama kaydetme
+                guard ts > windowStart else { continue }
+
                 if dInput > 0 || dOutput > 0 {
                     deltas.append(SessionEventDelta(
                         timestamp: ts,
@@ -247,6 +256,8 @@ final class SessionTokenParser: @unchecked Sendable {
                 }
             } else if let last = info["last_token_usage"] as? [String: Any] {
                 // Fallback: event başına değerler (delta zaten verilmiş)
+                guard ts > windowStart else { continue }
+
                 let dInput  = max(0, toInt(last["input_tokens"]))
                 let dCached = max(0, toInt(last["cached_input_tokens"] ?? last["cache_read_input_tokens"]))
                 let dOutput = max(0, toInt(last["output_tokens"]))

@@ -596,7 +596,7 @@ final class AppStore: ObservableObject {
     func resetStatistics() {
         let cacheDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex-switcher/cache")
-        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("event-deltas.json"))
+        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("event-deltas-v2.json"))
         try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json"))
         try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json.mod"))
         tokenUsage = [:]
