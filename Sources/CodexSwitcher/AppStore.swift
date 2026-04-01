@@ -41,6 +41,7 @@ final class AppStore: ObservableObject {
     private var authWatcherFd: Int32 = -1
     private var loginTimeout: DispatchWorkItem?
     private var lastAutoSwitchDate: Date?
+    private var rateLimitCheckPending = false
     private var lastAuthWriteDate: Date?
     private var consecutiveFetchFailures: Int = 0
     private var paceHistory: [SessionPacePoint] = []
@@ -475,12 +476,28 @@ final class AppStore: ObservableObject {
     }
 
     func handleRateLimitDetected() {
-        guard !allExhausted else { return }
-        // Cooldown: son otomatik geçişten bu yana yeterli süre geçmedi mi?
+        // UsageMonitor keyword tespiti yanlış pozitif olabilir (kod içindeki "rate_limit" stringleri,
+        // geçici per-request 429 hataları vb.). Gerçekten limiti dolduğunu API'den doğrula.
+        guard !allExhausted, !rateLimitCheckPending else { return }
         if let last = lastAutoSwitchDate,
            Date().timeIntervalSince(last) < Self.switchCooldown { return }
-        lastAutoSwitchDate = Date()
-        switchToNext(reason: L("Limit doldu", "Limit reached"))
+
+        rateLimitCheckPending = true
+        Task {
+            await fetchAllRateLimits(showSpinner: false)
+            rateLimitCheckPending = false
+
+            guard let activeId = activeProfile?.id else { return }
+
+            if let rl = rateLimits[activeId] {
+                // Güncel API verisi var — sadece gerçekten limitdeyse geç
+                guard rl.limitReached else { return }
+            }
+            // Hesap verisi yoksa (API başarısız) → ihtiyatlı olarak geç
+
+            lastAutoSwitchDate = Date()
+            switchToNext(reason: L("Limit doldu", "Limit reached"))
+        }
     }
 
     // MARK: - Add Account
