@@ -6,6 +6,10 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+<p align="center">
+  <img src="assets/screenshot.png" width="320" alt="CodexSwitcher showing multiple accounts with weekly/5-hour rate limit bars, token usage, cost, and the active account indicator">
+</p>
+
 ---
 
 ## Features
