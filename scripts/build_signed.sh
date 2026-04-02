@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 APP_NAME="CodexSwitcher"
-VERSION="1.9.1"
+VERSION="1.10.0"
 SIGN_IDENTITY="Developer ID Application: SENOL DOGAN (79DZ4AA4DW)"
 KEY_ID="VMU73YXDVJ"
 KEY_PATH="$HOME/Downloads/AuthKey_VMU73YXDVJ.p8"

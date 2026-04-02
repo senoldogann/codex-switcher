@@ -277,6 +277,55 @@ final class SessionTokenParser: @unchecked Sendable {
         return deltas
     }
 
+    // MARK: - Daily Aggregation (for 7-day chart)
+
+    /// Groups cached deltas into per-day, per-account token totals.
+    /// Reuses the delta cache written by calculate() so no extra file parsing.
+    func calculateDaily(profiles: [Profile], history: [SwitchEvent], activeProfileId: UUID?) -> [UUID: [DailyUsage]] {
+        let windowStart = Date().addingTimeInterval(-7 * 24 * 3600)
+        let deltaCache = loadDeltaCache()
+        guard !deltaCache.isEmpty else { return [:] }
+
+        let calendar = Calendar.current
+        let lastSwitchTime = history.max(by: { $0.timestamp < $1.timestamp })?.timestamp
+        var dailyTokens: [UUID: [Date: Int]] = [:]
+
+        for (_, deltas) in deltaCache {
+            for delta in deltas {
+                guard delta.timestamp > windowStart else { continue }
+
+                let profileId: UUID?
+                if let activeProfileId,
+                   let lastSwitch = lastSwitchTime,
+                   delta.timestamp > lastSwitch {
+                    profileId = activeProfileId
+                } else {
+                    profileId = findActiveProfile(at: delta.timestamp, profiles: profiles, history: history)
+                }
+                guard let pid = profileId else { continue }
+
+                let day = calendar.startOfDay(for: delta.timestamp)
+                let tokens = delta.inputDelta + delta.outputDelta
+                dailyTokens[pid, default: [:]][day, default: 0] += tokens
+            }
+        }
+
+        // Build full 7-day array for each profile (zero for missing days)
+        let today = calendar.startOfDay(for: Date())
+        var result: [UUID: [DailyUsage]] = [:]
+        for profile in profiles {
+            let dayData = dailyTokens[profile.id] ?? [:]
+            var days: [DailyUsage] = []
+            for offset in (0..<7).reversed() {
+                if let day = calendar.date(byAdding: .day, value: -offset, to: today) {
+                    days.append(DailyUsage(dayStart: day, tokens: dayData[day] ?? 0))
+                }
+            }
+            result[profile.id] = days
+        }
+        return result
+    }
+
     // MARK: - Cache I/O
 
     private func loadDeltaCache() -> [String: [SessionEventDelta]] {

@@ -23,6 +23,7 @@ final class AppStore: ObservableObject {
     @Published var staleProfileIds: Set<UUID> = []
     @Published var costs: [UUID: Double] = [:]
     @Published var forecasts: [UUID: RateLimitForecast] = [:]
+    @Published var dailyUsage: [UUID: [DailyUsage]] = [:]
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
     @Published var isSessionActive: Bool = false  // live session indicator
 
@@ -194,11 +195,12 @@ final class AppStore: ObservableObject {
         let activeProfileId = self.activeProfile?.id
         DispatchQueue.global(qos: .utility).async {
             let result = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
+            let daily  = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                // Verify profiles list hasn't changed dramatically
                 guard self.profiles.count == profiles.count else { return }
                 self.tokenUsage = result
+                self.dailyUsage = daily
                 self.updateCostsAndForecasts(profiles: profiles)
             }
         }

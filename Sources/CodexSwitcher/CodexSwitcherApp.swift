@@ -56,21 +56,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func updateStatusLabel() {
         guard let button = statusItem.button else { return }
         let exhausted = store.allExhausted
+        let rl = store.activeProfile.flatMap { store.rateLimit(for: $0) }
+        let weeklyRemaining = rl?.weeklyRemainingPercent ?? 100
+
+        // Icon
+        let iconName: String
+        if exhausted            { iconName = "exclamationmark.circle.fill" }
+        else if weeklyRemaining <= 15 { iconName = "exclamationmark.arrow.triangle.2.circlepath" }
+        else                    { iconName = "arrow.triangle.2.circlepath" }
 
         let cfg = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        let icon = NSImage(
-            systemSymbolName: exhausted ? "exclamationmark.circle.fill" : "arrow.triangle.2.circlepath",
-            accessibilityDescription: nil
-        )?.withSymbolConfiguration(cfg)
+        button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
 
-        button.image = icon
+        // Color tint: red when critical/exhausted, orange when warning, default otherwise
+        if exhausted || weeklyRemaining <= 15 {
+            button.contentTintColor = .systemRed
+        } else if weeklyRemaining <= 30 {
+            button.contentTintColor = .systemOrange
+        } else {
+            button.contentTintColor = nil
+        }
 
-        // Active profile rate limit özeti
+        // Title text
         if exhausted {
-            button.title = " !"
+            button.title = " Limit"
             button.imagePosition = .imageLeft
-        } else if let profile = store.activeProfile,
-                  let rl = store.rateLimit(for: profile) {
+        } else if let rl {
             var parts: [String] = []
             if let w = rl.weeklyRemainingPercent { parts.append("W:\(w)%") }
             if rl.isPlus, let h = rl.fiveHourRemainingPercent { parts.append("5h:\(h)%") }

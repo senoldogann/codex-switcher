@@ -7,6 +7,9 @@ struct MenuContentView: View {
     @State private var hoveredId: UUID? = nil
     @State private var appeared = false
     @State private var screen: NavScreen = .main
+    @State private var historyTab: HistoryTab = .list
+
+    enum HistoryTab { case list, chart }
 
     @AppStorage("emailsBlurred") private var emailsBlurred: Bool = false
     @AppStorage("isDarkMode")    private var isDarkMode: Bool = true
@@ -127,8 +130,28 @@ struct MenuContentView: View {
     // MARK: - History Content
 
     private var historyContent: some View {
-        Group {
-            if store.switchHistory.isEmpty {
+        VStack(spacing: 0) {
+            // History / Chart tab toggle
+            HStack(spacing: 0) {
+                tabBtn(icon: "list.bullet", label: L("Geçmiş", "History"), selected: historyTab == .list) {
+                    historyTab = .list
+                }
+                Divider().frame(height: 14).background(gw.opacity(0.08))
+                tabBtn(icon: "chart.line.uptrend.xyaxis", label: L("Grafik", "Chart"), selected: historyTab == .chart) {
+                    historyTab = .chart
+                }
+            }
+            .frame(height: 32)
+            .padding(.horizontal, 14)
+
+            Divider().background(gw.opacity(0.06))
+
+            if historyTab == .chart {
+                ScrollView(.vertical, showsIndicators: false) {
+                    UsageChartView().environmentObject(store)
+                }
+                .frame(maxHeight: 420)
+            } else if store.switchHistory.isEmpty {
                 Text(Str.noHistory)
                     .font(.system(size: 12))
                     .foregroundStyle(gw.opacity(0.35))
@@ -145,6 +168,22 @@ struct MenuContentView: View {
                 .frame(maxHeight: 420)
             }
         }
+    }
+
+    private func tabBtn(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
+                Text(label)
+                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(selected ? gw.opacity(0.75) : gw.opacity(0.35))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
     }
 
     // MARK: - Add Account Content

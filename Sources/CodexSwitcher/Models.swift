@@ -99,6 +99,14 @@ struct ModelTokenUsage: Codable, Equatable {
     }
 }
 
+// MARK: - Daily Usage (for 7-day chart)
+
+struct DailyUsage: Identifiable {
+    let dayStart: Date   // start of calendar day (local timezone)
+    let tokens: Int      // total input + output tokens for this day
+    var id: TimeInterval { dayStart.timeIntervalSince1970 }
+}
+
 // MARK: - Session Event
 
 struct SessionEvent: Codable {
