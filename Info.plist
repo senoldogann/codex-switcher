@@ -11,9 +11,9 @@
     <key>CFBundleName</key>
     <string>CodexSwitcher</string>
     <key>CFBundleVersion</key>
-    <string>1.11.0</string>
+    <string>1.12.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.11.0</string>
+    <string>1.12.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSUIElement</key>
@@ -24,11 +24,5 @@
     <string>Hesap geçişlerini bildirmek için</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Terminal'de codex login çalıştırmak için</string>
-    <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/senoldogann/codex-switcher/main/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>7lqmueyvl3O06tlzS0bafDBXiWwB0fkyW0/xScLU/Fo=</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
 </dict>
 </plist>

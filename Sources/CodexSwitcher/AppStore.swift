@@ -2,7 +2,6 @@ import Foundation
 import UserNotifications
 import AppKit
 import SwiftUI
-import Sparkle
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -28,11 +27,27 @@ final class AppStore: ObservableObject {
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
     @Published var isSessionActive: Bool = false  // live session indicator
 
-    /// Set by AppDelegate after Sparkle initializes
-    var updaterController: SPUStandardUpdaterController?
+    @Published var availableUpdate: UpdateChecker.Release? = nil
 
     func checkForUpdates() {
-        updaterController?.checkForUpdates(nil)
+        Task {
+            let release = await UpdateChecker.fetchIfNewer()
+            await MainActor.run { self.availableUpdate = release }
+            if let release {
+                sendNotification(
+                    title: L("Güncelleme mevcut", "Update available"),
+                    body: "CodexSwitcher \(release.version)"
+                )
+            }
+        }
+    }
+
+    func openReleasePage() {
+        if let url = availableUpdate?.releaseURL {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(URL(string: "https://github.com/senoldogann/codex-switcher/releases")!)
+        }
     }
 
     static let turnsLimit = 50

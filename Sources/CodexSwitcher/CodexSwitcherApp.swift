@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Sparkle
 
 @main
 struct CodexSwitcherApp: App {
@@ -17,18 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var store: AppStore { AppStore.shared }
-    private var updaterController: SPUStandardUpdaterController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-        store.updaterController = updaterController
         setupStatusItem()
         setupPopover()
+
+        // Check for updates in background, 3s after launch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            AppStore.shared.checkForUpdates()
+        }
 
         NotificationCenter.default.addObserver(
             self,

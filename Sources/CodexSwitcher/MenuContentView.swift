@@ -548,6 +548,39 @@ struct MenuContentView: View {
         return nil
     }
 
+    // MARK: - Update Button
+
+    private var updateButton: some View {
+        Button {
+            if store.availableUpdate != nil {
+                store.openReleasePage()
+            } else {
+                store.checkForUpdates()
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 2) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(L("Güncelle", "Update"))
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(store.availableUpdate != nil ? Color.orange.opacity(0.85) : gw.opacity(0.52))
+                .contentShape(Rectangle())
+
+                if store.availableUpdate != nil {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                        .offset(x: -4, y: 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
     // MARK: - Footer
 
     private var footerBar: some View {
@@ -566,9 +599,7 @@ struct MenuContentView: View {
                     withAnimation(.easeInOut(duration: 0.15)) { screen = .history }
                 }
                 thinDivider
-                footerBtn("arrow.down.circle", L("Güncelle", "Update")) {
-                    store.checkForUpdates()
-                }
+                updateButton
                 thinDivider
                 footerBtn("power", Str.quit) { NSApplication.shared.terminate(nil) }
             }

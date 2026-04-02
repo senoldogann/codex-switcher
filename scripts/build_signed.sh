@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 APP_NAME="CodexSwitcher"
-VERSION="1.11.0"
+VERSION="1.12.0"
 SIGN_IDENTITY="Developer ID Application: SENOL DOGAN (79DZ4AA4DW)"
 KEY_ID="VMU73YXDVJ"
 KEY_PATH="$HOME/Downloads/AuthKey_VMU73YXDVJ.p8"
@@ -59,20 +59,6 @@ fi
 echo "   ✓ Bundle structure:"
 find "$APP_BUNDLE" -not -path '*/\.*' | sed 's|'"$STAGING"'/||' | head -20
 
-# ── 2b. Embed Sparkle.framework ──────────────────────────────────────────────
-echo "📦 Embedding Sparkle.framework..."
-SPARKLE_FRAMEWORK=$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -path "*/macos-arm64_x86_64/*" | head -1)
-if [ -z "$SPARKLE_FRAMEWORK" ]; then
-    echo "❌ Sparkle.framework not found in .build/artifacts"
-    exit 1
-fi
-mkdir -p "$APP_BUNDLE/Contents/Frameworks"
-cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
-
-# Fix rpath: binary uses @loader_path, add ../Frameworks so it finds the framework
-install_name_tool -add_rpath "@executable_path/../Frameworks" \
-    "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
-
 # ── 3. Sign ──────────────────────────────────────────────────────────────────
 echo "✍️  Signing with Developer ID..."
 
@@ -95,12 +81,6 @@ if [ ! -f "$APP_BUNDLE/Contents/Resources/${APP_NAME}_${APP_NAME}.bundle/Info.pl
 </plist>
 PLIST
 fi
-
-# Sign Sparkle.framework (deep — it has nested XPC services)
-codesign --force --deep --sign "$SIGN_IDENTITY" \
-    --options runtime \
-    --timestamp \
-    "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
 
 # Sign resource bundle first (inner component before outer)
 codesign --force --sign "$SIGN_IDENTITY" \
@@ -147,16 +127,6 @@ mkdir -p "$RELEASE_DIR"
 DIST_ZIP="$RELEASE_DIR/${APP_NAME}-v${VERSION}-signed.zip"
 rm -f "$DIST_ZIP"
 ditto -c -k --keepParent "$APP_BUNDLE" "$DIST_ZIP"
-
-# ── 7. Sign zip for Sparkle appcast ─────────────────────────────────────────
-SIGN_UPDATE="$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin/sign_update"
-if [ -f "$SIGN_UPDATE" ]; then
-    echo "📝 Generating Sparkle EdDSA signature..."
-    SPARKLE_SIG=$("$SIGN_UPDATE" "$DIST_ZIP" 2>&1)
-    echo "   $SPARKLE_SIG"
-    echo ""
-    echo "   ↑ Add this to appcast.xml for v${VERSION}"
-fi
 
 echo ""
 echo "🎉 Hazır!"
