@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 APP_NAME="CodexSwitcher"
-VERSION="1.9.0"
+VERSION="1.9.1"
 SIGN_IDENTITY="Developer ID Application: SENOL DOGAN (79DZ4AA4DW)"
 KEY_ID="VMU73YXDVJ"
 KEY_PATH="$HOME/Downloads/AuthKey_VMU73YXDVJ.p8"
@@ -49,6 +49,12 @@ cp -r "$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle" "$APP_BUNDLE/Contents/Resource
 # Info.plist & PkgInfo
 cp "$ROOT_DIR/Info.plist" "$APP_BUNDLE/Contents/"
 printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
+
+# App icon — required for Dock/Finder icon
+ICON_SRC="$ROOT_DIR/Sources/CodexSwitcher/Resources/AppIcon.icns"
+if [ -f "$ICON_SRC" ]; then
+    cp "$ICON_SRC" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+fi
 
 echo "   ✓ Bundle structure:"
 find "$APP_BUNDLE" -not -path '*/\.*' | sed 's|'"$STAGING"'/||' | head -20

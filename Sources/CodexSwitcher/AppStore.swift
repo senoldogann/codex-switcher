@@ -418,8 +418,11 @@ final class AppStore: ObservableObject {
             $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }) else { return }
 
+        // Capture URL before killing — becomes inaccessible after process dies
         let bundleURL = codexApp.bundleURL
-        codexApp.terminate()
+
+        // forceTerminate = SIGKILL, no confirmation dialog, instant
+        codexApp.forceTerminate()
 
         sendNotification(
             title: L("Hesap değiştirildi", "Account Switched"),
@@ -427,7 +430,8 @@ final class AppStore: ObservableObject {
         )
 
         guard let url = bundleURL else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        // 1s is enough after force kill (no graceful shutdown to wait for)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
         }
     }
