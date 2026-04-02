@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened Runtime: no special entitlements needed for this app.
+         The app reads ~/.codex files, makes network calls, and opens apps —
+         all of which are allowed for non-sandboxed Developer ID apps. -->
+</dict>
+</plist>

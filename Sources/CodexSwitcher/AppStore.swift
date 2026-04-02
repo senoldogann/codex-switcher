@@ -454,7 +454,7 @@ final class AppStore: ObservableObject {
         alert.addButton(withTitle: Str.cancel)
 
         // Use Codex icon instead of blank app icon
-        if let url = Bundle.module.url(forResource: "codex", withExtension: "icns"),
+        if let url = Bundle.appResources.url(forResource: "codex", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
             alert.icon = icon
         }

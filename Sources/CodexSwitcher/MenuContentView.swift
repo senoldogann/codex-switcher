@@ -503,7 +503,7 @@ struct MenuContentView: View {
     }
 
     private func loadCodexIcon() -> NSImage? {
-        if let url = Bundle.module.url(forResource: "codex", withExtension: "icns") {
+        if let url = Bundle.appResources.url(forResource: "codex", withExtension: "icns") {
             return NSImage(contentsOf: url)
         }
         return nil
