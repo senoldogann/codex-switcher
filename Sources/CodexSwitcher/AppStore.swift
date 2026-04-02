@@ -414,24 +414,22 @@ final class AppStore: ObservableObject {
     // MARK: - Codex Restart
 
     private func restartCodexIfRunning() {
-        let codexRunning = NSWorkspace.shared.runningApplications.contains {
+        guard let codexApp = NSWorkspace.shared.runningApplications.first(where: {
             $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
-        }
-        guard codexRunning else { return }
+        }) else { return }
 
-        // Quit Codex so it restarts with the new account's auth
-        let script = NSAppleScript(source: "tell application \"Codex\" to quit")
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
-
-        if let error = error {
-            print("Failed to quit Codex: \(error)")
-        }
+        let bundleURL = codexApp.bundleURL
+        codexApp.terminate()
 
         sendNotification(
             title: L("Hesap değiştirildi", "Account Switched"),
             body: L("Codex yeniden başlatılıyor. Yeni hesap aktif.", "Codex is restarting. New account is now active.")
         )
+
+        guard let url = bundleURL else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
+        }
     }
 
     // MARK: - Rename

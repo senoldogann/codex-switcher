@@ -434,27 +434,42 @@ struct MenuContentView: View {
     // MARK: - History Row
 
     private func historyRow(_ event: SwitchEvent) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                if let from = event.fromAccountName {
-                    Text(from)
-                        .font(.system(size: 11))
-                        .foregroundStyle(gw.opacity(0.45))
-                    Image(systemName: "arrow.right")
+        let isAuto = event.reason.contains("Limit") || event.reason.contains("doldu")
+        let iconName = isAuto ? "bolt.fill" : "arrow.left.arrow.right"
+        let iconColor: Color = isAuto ? .orange : .blue
+
+        return HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(iconColor.opacity(0.12))
+                    .frame(width: 26, height: 26)
+                Image(systemName: iconName)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(iconColor.opacity(0.85))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    if let from = event.fromAccountName {
+                        Text(from)
+                            .font(.system(size: 11))
+                            .foregroundStyle(gw.opacity(0.45))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9))
+                            .foregroundStyle(gw.opacity(0.3))
+                    }
+                    Text(event.toAccountName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(gw.opacity(0.8))
+                }
+                HStack(spacing: 6) {
+                    Text(event.reason)
                         .font(.system(size: 9))
                         .foregroundStyle(gw.opacity(0.3))
+                    Text(event.timestamp, style: .relative)
+                        .font(.system(size: 9))
+                        .foregroundStyle(gw.opacity(0.25))
                 }
-                Text(event.toAccountName)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(gw.opacity(0.8))
-            }
-            HStack(spacing: 6) {
-                Text(event.reason)
-                    .font(.system(size: 9))
-                    .foregroundStyle(gw.opacity(0.3))
-                Text(event.timestamp, style: .relative)
-                    .font(.system(size: 9))
-                    .foregroundStyle(gw.opacity(0.25))
             }
         }
         .padding(.horizontal, 14)
