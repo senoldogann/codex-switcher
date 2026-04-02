@@ -14,79 +14,46 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts and automatical
 
 ## Features
 
-- **Auto-switching** — Detects rate limits from session logs and instantly switches to the best available account
+- **Auto-switching** — Detects rate limits via API verification and switches to the best available account
 - **Smart selection** — Picks the account with the lowest weekly usage %, not just round-robin
-- **Real-time usage tracking** — Live session activity indicator and per-account token attribution
-- **Cost tracking** — Per-account token usage and USD cost with model-specific pricing (matches CodexBar)
-- **Model-aware pricing** — Accurate costs for gpt-4.x, gpt-5.x, o3, o4-mini with cached token discounts
-- **Rate limit bars** — Weekly and 5-hour (Plus/Pro) rate limit progress bars per account
-- **Rate limit forecasting** — Estimates time-to-exhaustion based on usage pace and historical patterns
-- **Account health indicators** — Per-account status dots: 🟢 healthy, 🟡 stale token, ⚪ unchecked
+- **Codex auto-restart** — Automatically force-quits and relaunches Codex after every account switch
+- **Per-event token attribution** — Accurate per-account token tracking using delta computation (matches CodexBar)
+- **Cost tracking** — Per-account USD cost with model-specific pricing for gpt-4.x, gpt-5.x, o3, o4-mini
+- **Rate limit bars** — Weekly and 5-hour (Plus/Pro) remaining progress bars per account
+- **Rate limit forecasting** — Estimates time-to-exhaustion based on usage pace
+- **Account health indicators** — 🟢 healthy · 🟡 stale token · ⚪ unchecked · 🔒 exhausted
 - **Live session indicator** — Green pulse when Codex is actively using tokens
-- **Exhaustion UX** — Clear banner when all accounts are rate-limited, with next-reset time and manual override
+- **Switch history** — Full log with type icons: ⚡ auto-switch · ↔ manual switch
+- **80% warning** — Notification when an account is approaching its weekly limit
 - **Restored notifications** — Get notified when a rate-limited account becomes available again
-- **Lock icons** — Visual lock indicator on exhausted accounts
-- **Auth recovery** — Automatic recovery if `~/.codex/auth.json` is corrupted or deleted
-- **Switch verification** — Post-switch confirmation that the correct account is active, with automatic rollback on failure
-- **In-app login** — Add accounts without Terminal popup; secure browser-based login flow
-- **Email privacy** — One-click blur toggle to hide email addresses
+- **Re-login flow** — Refresh stale tokens without leaving the app
+- **Reset statistics** — Clear token/cost data with one click
+- **Email privacy** — One-click blur toggle for email addresses
 - **Dark / Light mode** — Persistent appearance preference
-- **TR / EN language** — Turkish and English UI support (auto-detects system language)
-- **Account aliases** — Give each account a friendly name; rename anytime via right-click
-- **Switch history** — Track all account switches with reasons and timestamps
-- **Liquid glass UI** — Native macOS frosted-glass popover design
+- **TR / EN language** — Turkish and English UI (auto-detects system language)
+- **Account aliases** — Friendly names per account, rename via right-click
+- **Auth recovery** — Automatic recovery if `~/.codex/auth.json` is corrupted
+- **Switch verification** — Post-switch confirmation with automatic rollback on failure
 - **Zero dependencies** — Pure Swift, no external packages
-- **CPU optimized** — File modification time caching to avoid re-parsing unchanged session files
 
 ---
 
 ## Requirements
 
 - macOS 26 (Tahoe) or later
-- [OpenAI Codex CLI](https://github.com/openai/codex) installed (`codex` accessible in `$PATH`)
-- Xcode 16 / Swift 6.2 (for building from source)
+- [OpenAI Codex CLI](https://github.com/openai/codex) installed (`codex` in `$PATH`)
 
 ---
 
 ## Installation
 
-### Download (recommended)
-
-1. Download `CodexSwitcher-vX.X.X.zip` from the [Releases](../../releases) page
-2. Unzip and move `CodexSwitcher.app` to `/Applications`
+1. Download `CodexSwitcher-vX.X.X-signed.zip` from the [Releases](../../releases) page
+2. Unzip and move `CodexSwitcher` to `/Applications`
 3. Launch — the app appears in the menu bar
 
-> **⚠️ macOS Gatekeeper Warning**
->
-> Because CodexSwitcher is not notarized with an Apple Developer certificate, macOS may block it on first launch with a message like *"Apple could not verify…"* or *"app is damaged"*. This is expected for open-source apps distributed outside the App Store.
->
-> **Fix — Option A (GUI):**
-> 1. Click **Done** on the warning dialog
-> 2. Open **System Settings → Privacy & Security**
-> 3. Scroll down → click **Open Anyway**
->
-> **Fix — Option B (Terminal, one command):**
-> ```bash
-> xattr -dr com.apple.quarantine /Applications/CodexSwitcher.app
-> ```
-> After either fix, the app opens normally and you won't be asked again.
+> The app is signed with a Developer ID certificate and notarized by Apple. No Gatekeeper warning on first launch.
 
-### Build from source
-
-```bash
-git clone https://github.com/senoldogan/codex-switcher.git
-cd codex-switcher
-bash build.sh
-open CodexSwitcher.app
-```
-
-To install permanently:
-
-```bash
-cp -R CodexSwitcher.app /Applications/
-```
-
-To launch at login: **System Settings → General → Login Items** → add `CodexSwitcher.app`.
+To launch at login: **System Settings → General → Login Items** → add `CodexSwitcher`.
 
 ---
 
@@ -96,22 +63,24 @@ To launch at login: **System Settings → General → Login Items** → add `Cod
 ~/.codex/auth.json          ← active account credentials (Codex reads this)
 ~/.codex/sessions/*.jsonl   ← session logs (CodexSwitcher monitors for rate limits)
 ~/.codex-switcher/profiles/ ← stored credentials per account
+~/.codex-switcher/cache/    ← token delta cache for fast attribution
 ```
 
-1. CodexSwitcher watches `~/.codex/sessions/` for rate-limit events (`429`, `rate_limit`, `quota_exceeded`)
-2. On detection it atomically replaces `~/.codex/auth.json` with the best available account
-3. Rate-limit data is fetched from the Codex API for all accounts on each popover open
-4. After switching, the new auth is verified — if verification fails, automatic rollback occurs
+1. CodexSwitcher watches `~/.codex/sessions/` for rate-limit signals
+2. On detection it calls the Codex rate-limit API to **confirm** the limit is actually reached (no false positives from keywords in code or temporary 429s)
+3. If confirmed, it atomically replaces `~/.codex/auth.json` with the best available account
+4. Codex is force-quit and relaunched automatically so it picks up the new credentials
+5. The switch is verified — if verification fails, automatic rollback occurs
 
 ---
 
 ## Adding Accounts
 
 1. Click the menu bar icon → **Add Account** (`+`)
-2. Browser opens automatically for sign-in (no Terminal popup)
-3. Sign in with your account in the browser
+2. Browser opens automatically for sign-in
+3. Sign in with your account
 4. CodexSwitcher detects the new credentials automatically
-5. Optionally give the account an alias, then click **Save**
+5. Optionally give the account an alias → click **Save**
 
 ---
 
@@ -121,60 +90,44 @@ To launch at login: **System Settings → General → Login Items** → add `Cod
 |--------|-----|
 | Switch account | Click an account row |
 | Force switch to next | Click **Switch Now** in the footer |
-| Rename account | Right-click account row → **Rename** |
-| Delete account | Right-click account row → **Delete** |
-| Blur/show emails | Settings bar → 👁 icon |
-| Toggle dark/light | Settings bar → 🌙/☀️ icon |
-| Change language | Settings bar → 🌐 icon (cycles Auto → TR → EN) |
 | View switch history | Click **History** in the footer |
-
-### Health Indicators
-
-Each account row shows a colored dot indicating auth health:
-
-| Indicator | Meaning |
-|-----------|---------|
-| 🟢 Green | Healthy — API responding, auth valid |
-| 🟡 Yellow | Stale — Token expired (401/403), re-login needed |
-| ⚪ Gray | Unknown — Not yet checked or network error |
-| 🔒 Red lock | Exhausted — Rate limit reached |
-
-### Exhaustion State
-
-When all accounts are rate-limited, a banner appears with:
-- Which account resets next and when
-- A **"Switch anyway"** button for manual override
+| Rename account | Right-click → **Rename** |
+| Delete account | Right-click → **Delete** |
+| Re-login stale account | Right-click → **Re-login** |
+| Reset token statistics | Settings bar → ↺ |
+| Blur/show emails | Settings bar → 👁 |
+| Toggle dark/light | Settings bar → 🌙/☀️ |
+| Change language | Settings bar → 🌐 (Auto → TR → EN) |
 
 ---
 
 ## Changelog
 
-### v1.5.2
-- **Codex auto-restart** — Codex now automatically quits when switching accounts, ensuring the new account's session is used immediately (restored previous behavior)
+### v1.9.1
+- **Codex force-quit** — Switched from `terminate()` to `forceTerminate()` (SIGKILL); eliminates the "Quit Codex?" confirmation dialog
+- **App icon fix** — Icon now correctly appears in Dock and Finder
 
-### v1.5.1
-- **Race condition fix** — Prevents token/cost data from appearing on wrong accounts during rapid switches
-- **Auth file sync** — Fixed auth.json mismatch after account switches
+### v1.9.0
+- **Codex auto-restart** — Codex is automatically closed and relaunched after every account switch; no more manual exit required
+- **History icons** — Switch history entries now show ⚡ (orange, auto) or ↔ (blue, manual) icons
+- **Signed & notarized** — App signed with Developer ID and notarized by Apple; no Gatekeeper warning
 
-### v1.5.0
-- **Real-time session indicator** — Live green pulse on the active account when Codex is actively processing
-- **Model-aware cost calculation** — Accurate pricing for gpt-4.x, gpt-5.x, o3, o4-mini including cached token discounts
-- **Improved token attribution** — Sessions are correctly attributed to accounts based on switch history
-- **Live usage updates** — Session file monitoring triggers immediate UI refresh when new tokens are detected
-- **Bug fixes** — Account switching now properly updates both config and auth files
+### v1.8.2
+- **API-verified auto-switch** — Rate limit detection now confirms via API before switching; eliminates false positives from "rate_limit" strings in user code or temporary 429 errors
 
-### v1.4.0
-- Per-account token usage and cost tracking
-- Rate limit forecasting with time-to-exhaustion estimates
-- Restored notifications when rate limits reset
-- In-app login flow without Terminal popup
-- Switch verification with automatic rollback
+### v1.8.1
+- **Window-aware baseline** — Long-running sessions spanning the 7-day window boundary no longer produce token spikes on the first in-window event
+- **No-history attribution** — Tokens from before any switch history are dropped rather than incorrectly assigned to the first account
 
-### v1.3.0
-- Smart account selection by weekly usage percentage
-- Account health indicators (healthy, stale, unchecked)
-- Exhaustion state with next-reset info
-- Turkish and English language support
+### v1.8.0
+- **Per-event delta attribution** — Complete rewrite of token parser using per-event delta computation (same approach as CodexBar); eliminates billions of misattributed tokens from cumulative totals
+
+### v1.7.0
+- **Energy optimization** — Polling interval increased from 60s to 300s; file descriptor leak fixed; 10s debounce on token refresh
+- **Reset statistics** — Clear all token/cost/forecast data with one click
+- **Model name display** — Most-used model shown per account
+- **Re-login flow** — Refresh expired tokens for stale accounts without leaving the app
+- **80% limit warning** — Notification when weekly usage crosses 80%
 
 ---
 
@@ -182,16 +135,16 @@ When all accounts are rate-limited, a banner appears with:
 
 | File | Responsibility |
 |------|---------------|
-| `AppStore.swift` | Central state management, profile CRUD, smart switching, rate limit polling |
+| `AppStore.swift` | Central state, profile CRUD, smart switching, rate limit polling, Codex restart |
 | `ProfileManager.swift` | Auth file management, verification, backup/rollback |
+| `SessionTokenParser.swift` | Per-event delta attribution with 7-day window and account mapping |
 | `RateLimitFetcher.swift` | API polling for rate limit data |
 | `RateLimitForecaster.swift` | Usage pace analysis and exhaustion prediction |
 | `CostCalculator.swift` | USD cost calculation with model-specific pricing |
 | `UsageMonitor.swift` | FSEvents-based session log watcher |
-| `SessionTokenParser.swift` | Per-account token usage with model tracking and file caching |
 | `MenuContentView.swift` | Popover UI with inline navigation |
-| `AddAccountInlineView.swift` | Inline account addition with browser-based login |
-| `L10n.swift` | TR/EN localization system |
+| `BundleExtension.swift` | Bundle.appResources — correct icon lookup in signed .app |
+| `L10n.swift` | TR/EN localization |
 
 ---
 
