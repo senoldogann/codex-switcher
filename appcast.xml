@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>CodexSwitcher</title>
+        <link>https://github.com/senoldogann/codex-switcher</link>
+        <description>CodexSwitcher update feed</description>
+        <language>en</language>
+
+        <item>
+            <title>Version 1.11.0</title>
+            <sparkle:version>1.11.0</sparkle:version>
+            <sparkle:shortVersionString>1.11.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <pubDate>Thu, 03 Apr 2026 18:00:00 +0000</pubDate>
+            <sparkle:releaseNotesLink>https://github.com/senoldogann/codex-switcher/releases/tag/v1.11.0</sparkle:releaseNotesLink>
+            <enclosure
+                url="https://github.com/senoldogann/codex-switcher/releases/download/v1.11.0/CodexSwitcher-v1.11.0-signed.zip"
+                sparkle:edSignature="Q410Pas1otpQIefGqXA9QwOiZP135HPnz/Gv4W+hSi3mi9smPgpZ6/1Jzbft54IVUbzVxWuTrmJFhoPPENfqAA=="
+                length="2555612"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
+            <title>Version 1.10.0</title>
+            <sparkle:version>1.10.0</sparkle:version>
+            <sparkle:shortVersionString>1.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <pubDate>Thu, 03 Apr 2026 12:00:00 +0000</pubDate>
+            <sparkle:releaseNotesLink>https://github.com/senoldogann/codex-switcher/releases/tag/v1.10.0</sparkle:releaseNotesLink>
+            <enclosure
+                url="https://github.com/senoldogann/codex-switcher/releases/download/v1.10.0/CodexSwitcher-v1.10.0-signed.zip"
+                sparkle:edSignature="ek4gBTDVPGVqp6KTVlvXgOSuOkOZNpYFb44MXjGERLZ9CwGNq6stUMAob4fy4+OByszmm3Ghit7pJE1Lfj9EDQ=="
+                length="1429227"
+                type="application/octet-stream"/>
+        </item>
+
+    </channel>
+</rss>

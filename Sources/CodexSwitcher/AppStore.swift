@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 import AppKit
 import SwiftUI
+import Sparkle
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -26,6 +27,13 @@ final class AppStore: ObservableObject {
     @Published var dailyUsage: [UUID: [DailyUsage]] = [:]
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
     @Published var isSessionActive: Bool = false  // live session indicator
+
+    /// Set by AppDelegate after Sparkle initializes
+    var updaterController: SPUStandardUpdaterController?
+
+    func checkForUpdates() {
+        updaterController?.checkForUpdates(nil)
+    }
 
     static let turnsLimit = 50
     static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)

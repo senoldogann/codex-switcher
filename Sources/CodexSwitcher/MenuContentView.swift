@@ -566,6 +566,10 @@ struct MenuContentView: View {
                     withAnimation(.easeInOut(duration: 0.15)) { screen = .history }
                 }
                 thinDivider
+                footerBtn("arrow.down.circle", L("Güncelle", "Update")) {
+                    store.checkForUpdates()
+                }
+                thinDivider
                 footerBtn("power", Str.quit) { NSApplication.shared.terminate(nil) }
             }
             .frame(height: 44)
