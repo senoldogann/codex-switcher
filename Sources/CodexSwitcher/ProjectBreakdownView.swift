@@ -11,11 +11,11 @@ struct ProjectBreakdownView: View {
     private var gw: Color { scheme == .dark ? .white : .black }
 
     private var maxTokens: Int {
-        store.projectUsage.first?.tokens ?? 1
+        store.analyticsSnapshot.projects.first?.tokens ?? 1
     }
 
     var body: some View {
-        if store.projectUsage.isEmpty {
+        if store.analyticsSnapshot.projects.isEmpty {
             Text(L("Veri yok", "No data yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(gw.opacity(0.35))
@@ -50,7 +50,7 @@ struct ProjectBreakdownView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(store.projectUsage) { project in
+                    ForEach(store.analyticsSnapshot.projects) { project in
                         projectRow(project)
                         Divider().background(gw.opacity(0.05))
                     }
@@ -63,8 +63,8 @@ struct ProjectBreakdownView: View {
     // MARK: - Drill-down: sessions for a project
 
     private func drillDownView(for path: String) -> some View {
-        let name = store.projectUsage.first(where: { $0.path == path })?.name ?? path
-        let sessions = store.sessionSummaries.filter { $0.projectPath == path }
+        let name = store.analyticsSnapshot.projects.first(where: { $0.path == path })?.name ?? path
+        let sessions = store.analyticsSnapshot.sessions.filter { $0.projectPath == path }
 
         return VStack(spacing: 0) {
             // Back + title
@@ -153,7 +153,7 @@ struct ProjectBreakdownView: View {
     }
 
     private func exportCSV() {
-        let csv = ProjectCSVExporter.buildCSV(for: store.projectUsage)
+        let csv = ProjectCSVExporter.buildCSV(for: store.analyticsSnapshot.projects)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "codex-usage.csv"
         panel.allowedContentTypes = [.commaSeparatedText]

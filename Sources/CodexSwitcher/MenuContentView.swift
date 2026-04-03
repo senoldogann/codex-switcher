@@ -69,24 +69,83 @@ struct MenuContentView: View {
     // MARK: - Main Content
 
     private var mainContent: some View {
-        Group {
-            if store.allExhausted && !store.profiles.isEmpty {
-                exhaustionBanner
-            }
-            if store.profiles.isEmpty {
-                emptyState
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(store.profiles.enumerated()), id: \.element.id) { i, p in
-                            if i > 0 { separator }
-                            profileRow(p)
+        VStack(spacing: 0) {
+            analyticsQuickSummary
+
+            Group {
+                if store.allExhausted && !store.profiles.isEmpty {
+                    exhaustionBanner
+                }
+                if store.profiles.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(store.profiles.enumerated()), id: \.element.id) { i, p in
+                                if i > 0 { separator }
+                                profileRow(p)
+                            }
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var analyticsQuickSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Analitik", "Analytics"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.72))
+                    Text(store.analyticsTimeRange.title)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(gw.opacity(0.28))
+                }
+
+                Spacer()
+
+                Button {
+                    store.openAnalyticsWindow()
+                } label: {
+                    Label(L("Aç", "Open"), systemImage: "arrow.up.forward.app")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(gw.opacity(0.64))
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+
+            HStack(spacing: 10) {
+                quickMetric(label: L("Token", "Tokens"), value: formatTokens(store.analyticsSnapshot.summary.totalTokens))
+                quickMetric(label: L("Maliyet", "Cost"), value: CostCalculator.format(store.analyticsSnapshot.summary.estimatedTotalCost))
+                quickMetric(label: L("Alert", "Alerts"), value: "\(store.analyticsSnapshot.summary.activeAlertCount)")
+            }
+
+            if let message = store.analyticsSnapshot.dataQuality.message {
+                Text(message)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.3))
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(gw.opacity(0.03))
+    }
+
+    private func quickMetric(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(gw.opacity(0.25))
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(gw.opacity(0.68))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var exhaustionBanner: some View {

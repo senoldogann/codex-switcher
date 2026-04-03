@@ -3,13 +3,25 @@ import Testing
 @testable import CodexSwitcher
 
 struct TopDollarInsightsTests {
+    private func snapshot(from parser: SessionTokenParser, range: AnalyticsTimeRange = .allTime) -> AnalyticsSnapshot {
+        AnalyticsEngine().makeSnapshot(
+            range: range,
+            profiles: [],
+            usageRecords: [],
+            sessionRecords: parser.calculateSessionRecords(range: range),
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+    }
+
     @Test
     func insightsSortExpensiveTurnsByTrueCostIncludingCachedInputTokens() throws {
         let fixture = try TopDollarFixture.make()
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         #expect(insights.expensiveTurns.count == 2)
         #expect(insights.expensiveTurns.map(\.promptPreview) == ["mini turn", "cached-heavy turn"])
@@ -22,7 +34,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let expected = CostCalculator().cost(
             for: AccountTokenUsage(
@@ -103,7 +115,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let turn = try #require(insights.expensiveTurns.first)
         let expected = CostCalculator().cost(
@@ -149,7 +161,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let turn = try #require(insights.expensiveTurns.first)
         #expect(turn.model == "gpt-5-codex")
@@ -179,7 +191,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let turn = try #require(insights.expensiveTurns.first)
         #expect(turn.model == "gpt-5.4-mini")
@@ -209,7 +221,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let turn = try #require(insights.expensiveTurns.first)
         #expect(insights.expensiveTurns.count == 1)
@@ -251,7 +263,7 @@ struct TopDollarInsightsTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights()
+        let insights = snapshot(from: parser)
 
         let calendar = Calendar.current
         let formatter = ISO8601DateFormatter()

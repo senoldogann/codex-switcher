@@ -47,9 +47,9 @@ struct SessionExplorerView: View {
     private var gw: Color { scheme == .dark ? .white : .black }
 
     private var filteredSessions: [SessionSummary] {
-        guard !searchText.isEmpty else { return store.sessionSummaries }
+        guard !searchText.isEmpty else { return store.analyticsSnapshot.sessions }
         let q = searchText.lowercased()
-        return store.sessionSummaries.filter {
+        return store.analyticsSnapshot.sessions.filter {
             $0.firstPrompt.lowercased().contains(q) ||
             $0.projectName.lowercased().contains(q)
         }
@@ -60,7 +60,7 @@ struct SessionExplorerView: View {
     }
 
     var body: some View {
-        if store.sessionSummaries.isEmpty {
+        if store.analyticsSnapshot.sessions.isEmpty {
             Text(L("Veri yok", "No data yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(gw.opacity(0.35))

@@ -7,11 +7,11 @@ struct ExpensivePromptsView: View {
     private var gw: Color { scheme == .dark ? .white : .black }
 
     private var metrics: ExpensiveTurnMetrics {
-        ExpensiveTurnMetrics(turns: store.expensiveTurns)
+        ExpensiveTurnMetrics(turns: store.analyticsSnapshot.expensiveTurns)
     }
 
     var body: some View {
-        if store.expensiveTurns.isEmpty {
+        if store.analyticsSnapshot.expensiveTurns.isEmpty {
             Text(L("Veri yok", "No data yet"))
                 .font(.system(size: 12))
                 .foregroundStyle(gw.opacity(0.35))
@@ -20,7 +20,7 @@ struct ExpensivePromptsView: View {
         } else {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(store.expensiveTurns.enumerated()), id: \.element.id) { rank, turn in
+                    ForEach(Array(store.analyticsSnapshot.expensiveTurns.enumerated()), id: \.element.id) { rank, turn in
                         turnRow(turn, rank: rank + 1)
                         Divider().background(gw.opacity(0.05))
                     }

@@ -19,13 +19,13 @@ struct UsageChartView: View {
     /// Accounts that have at least one non-zero day in the window
     private var activeProfiles: [Profile] {
         store.profiles.filter { profile in
-            store.dailyUsage[profile.id]?.contains { $0.tokens > 0 } == true
+            store.analyticsSnapshot.dailyUsageByProfile[profile.id]?.contains { $0.tokens > 0 } == true
         }
     }
 
     private var chartPoints: [ChartPoint] {
         activeProfiles.flatMap { profile in
-            (store.dailyUsage[profile.id] ?? []).map { day in
+            (store.analyticsSnapshot.dailyUsageByProfile[profile.id] ?? []).map { day in
                 ChartPoint(day: day.dayStart, tokens: day.tokens, label: profile.displayName)
             }
         }
@@ -39,6 +39,7 @@ struct UsageChartView: View {
 
     private var rangeTitle: String {
         switch store.analyticsTimeRange {
+        case .twentyFourHours: return L("Son 24 saat — Token kullanımı", "Last 24 hours — Token usage")
         case .sevenDays: return L("Son 7 gün — Token kullanımı", "Last 7 days — Token usage")
         case .thirtyDays: return L("Son 30 gün — Token kullanımı", "Last 30 days — Token usage")
         case .allTime: return L("Tüm zamanlar — Token kullanımı", "All time — Token usage")
@@ -47,6 +48,7 @@ struct UsageChartView: View {
 
     private var emptyTitle: String {
         switch store.analyticsTimeRange {
+        case .twentyFourHours: return L("Son 24 saatte kullanım verisi yok", "No usage data in the last 24 hours")
         case .sevenDays: return L("Son 7 günde kullanım verisi yok", "No usage data in the last 7 days")
         case .thirtyDays: return L("Son 30 günde kullanım verisi yok", "No usage data in the last 30 days")
         case .allTime: return L("Henüz kullanım verisi yok", "No usage data yet")
@@ -134,7 +136,7 @@ struct UsageChartView: View {
                 Divider().background(gw.opacity(0.05)).padding(.top, 10)
 
                 ForEach(activeProfiles) { profile in
-                    let days = store.dailyUsage[profile.id] ?? []
+                    let days = store.analyticsSnapshot.dailyUsageByProfile[profile.id] ?? []
                     let total = days.reduce(0) { $0 + $1.tokens }
                     HStack(spacing: 6) {
                         Text(profile.displayName)

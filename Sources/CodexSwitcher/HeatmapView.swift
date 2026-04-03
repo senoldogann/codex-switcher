@@ -12,7 +12,7 @@ struct HeatmapView: View {
     private let gap:   CGFloat = 2
 
     private var maxTokens: Int {
-        store.hourlyActivity.map(\.tokens).max() ?? 1
+        store.analyticsSnapshot.hourlyActivity.map(\.tokens).max() ?? 1
     }
 
     var body: some View {
@@ -91,14 +91,14 @@ struct HeatmapView: View {
     }
 
     private func tokensFor(dow: Int, hour: Int) -> Int {
-        store.hourlyActivity.first { $0.dayOfWeek == dow && $0.hour == hour }?.tokens ?? 0
+        store.analyticsSnapshot.hourlyActivity.first { $0.dayOfWeek == dow && $0.hour == hour }?.tokens ?? 0
     }
 
     // Summary: peak day + peak hour
     @ViewBuilder
     private var peakSummary: some View {
-        let byDay  = (0..<7).map  { dow  in (dow,  store.hourlyActivity.filter { $0.dayOfWeek == dow  }.map(\.tokens).reduce(0, +)) }
-        let byHour = (0..<24).map { hour in (hour, store.hourlyActivity.filter { $0.hour == hour       }.map(\.tokens).reduce(0, +)) }
+        let byDay  = (0..<7).map  { dow  in (dow,  store.analyticsSnapshot.hourlyActivity.filter { $0.dayOfWeek == dow  }.map(\.tokens).reduce(0, +)) }
+        let byHour = (0..<24).map { hour in (hour, store.analyticsSnapshot.hourlyActivity.filter { $0.hour == hour       }.map(\.tokens).reduce(0, +)) }
 
         if let peakDay  = byDay.max(by:  { $0.1 < $1.1 }),
            let peakHour = byHour.max(by: { $0.1 < $1.1 }),

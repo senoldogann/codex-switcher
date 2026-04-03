@@ -25,16 +25,12 @@ final class AppStore: ObservableObject {
     @Published var rateLimitHealth: [UUID: RateLimitHealthStatus] = [:]
     @Published var costs: [UUID: Double] = [:]
     @Published var forecasts: [UUID: RateLimitForecast] = [:]
-    @Published var dailyUsage: [UUID: [DailyUsage]] = [:]
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
     @Published var isSessionActive: Bool = false  // live session indicator
 
     @Published var updateStatus: UpdateStatusSnapshot = .idle(currentVersion: UpdateChecker.currentVersion())
-    @Published var projectUsage: [ProjectUsage] = []
-    @Published var sessionSummaries: [SessionSummary] = []
-    @Published var hourlyActivity: [HourlyActivity] = []
-    @Published var expensiveTurns: [ExpensiveTurn] = []
     @Published var analyticsTimeRange: AnalyticsTimeRange = .sevenDays
+    @Published var analyticsSnapshot: AnalyticsSnapshot = .empty(for: .sevenDays)
     @Published var switchOrchestrationState: SwitchOrchestrationState = .idle
     @Published var pendingSwitchRequest: PendingSwitchRequest?
     @Published var lastSeamlessSwitchResult: SeamlessSwitchResult?
@@ -112,6 +108,7 @@ final class AppStore: ObservableObject {
     private let historyStore = SwitchHistoryStore()
     private let switchTimelineStore = SwitchTimelineStore()
     private let tokenParser = SessionTokenParser()
+    private let analyticsEngine = AnalyticsEngine()
     private var usageTimer: Timer?
     private var rateLimitTimer: Timer?
     private var automationHealthTimer: Timer?
@@ -136,6 +133,7 @@ final class AppStore: ObservableObject {
     private var seamlessVerificationWork: DispatchWorkItem?
     private var syncedTimelineEventCount = 0
     private var lastAutomationAlertFingerprint: String?
+    private var analyticsWindow: NSWindow?
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -314,27 +312,49 @@ final class AppStore: ObservableObject {
         let profiles = self.profiles
         let history  = self.switchHistory
         let parser   = self.tokenParser
+        let engine = self.analyticsEngine
         let activeProfileId = self.activeProfile?.id
         let range = self.analyticsTimeRange
+        let rateLimits = self.rateLimits
+        let rateLimitHealth = self.rateLimitHealth
+        let paceHistory = self.paceHistory
         DispatchQueue.global(qos: .utility).async {
             let result   = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
             let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId, range: range)
-            let insights = parser.calculateInsights(range: range)
+            let records  = parser.calculateAnalyticsRecords(profiles: profiles, history: history, activeProfileId: activeProfileId)
+            let sessionRecords = parser.calculateSessionRecords(range: range)
+            let (newCosts, newForecasts) = Self.calculateCostsAndForecasts(
+                profiles: profiles,
+                tokenUsage: result,
+                rateLimits: rateLimits,
+                paceHistory: paceHistory
+            )
+            let snapshot = engine.makeSnapshot(
+                range: range,
+                profiles: profiles,
+                usageRecords: records,
+                dailyUsageByProfile: daily,
+                sessionRecords: sessionRecords,
+                rateLimits: rateLimits,
+                rateLimitHealth: rateLimitHealth,
+                forecasts: newForecasts
+            )
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 guard self.profiles.count == profiles.count else { return }
                 self.tokenUsage       = result
-                self.dailyUsage       = daily
-                self.projectUsage     = insights.projects
-                self.sessionSummaries = insights.sessions
-                self.hourlyActivity   = insights.hourlyActivity
-                self.expensiveTurns   = insights.expensiveTurns
-                self.updateCostsAndForecasts(profiles: profiles)
+                self.analyticsSnapshot = snapshot
+                self.applyCostsAndForecasts(newCosts: newCosts, newForecasts: newForecasts)
             }
         }
     }
 
-    private func updateCostsAndForecasts(profiles: [Profile]) {
+    nonisolated private static func calculateCostsAndForecasts(
+        profiles: [Profile],
+        tokenUsage: [UUID: AccountTokenUsage],
+        rateLimits: [UUID: RateLimitInfo],
+        paceHistory: [SessionPacePoint]
+    ) -> ([UUID: Double], [UUID: RateLimitForecast]) {
         let calculator = CostCalculator()
         var newCosts: [UUID: Double] = [:]
         var newForecasts: [UUID: RateLimitForecast] = [:]
@@ -351,6 +371,10 @@ final class AppStore: ObservableObject {
             )
         }
 
+        return (newCosts, newForecasts)
+    }
+
+    private func applyCostsAndForecasts(newCosts: [UUID: Double], newForecasts: [UUID: RateLimitForecast]) {
         costs = newCosts
         forecasts = newForecasts
         refreshReliabilityAnalytics()
@@ -404,7 +428,7 @@ final class AppStore: ObservableObject {
 
         let totalCost   = costs.values.reduce(0, +)
         let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
-        let topProject  = projectUsage.first?.name ?? "—"
+        let topProject  = analyticsSnapshot.summary.mostExpensiveProjectName ?? "—"
 
         func fmt(_ n: Int) -> String {
             n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000)
@@ -485,7 +509,41 @@ final class AppStore: ObservableObject {
     func setAnalyticsTimeRange(_ range: AnalyticsTimeRange) {
         guard analyticsTimeRange != range else { return }
         analyticsTimeRange = range
+        analyticsSnapshot = .empty(for: range)
         refreshTokenUsage()
+    }
+
+    func openAnalyticsWindow() {
+        if let window = analyticsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(NSApp)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hosting = NSHostingView(rootView: AnalyticsWindowView().environmentObject(self))
+        hosting.frame = NSRect(x: 0, y: 0, width: 1040, height: 780)
+
+        let window = NSWindow(
+            contentRect: hosting.frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = L("Analitik", "Analytics")
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.contentView = hosting
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 920, height: 680)
+        let isDark = UserDefaults.standard.object(forKey: "isDarkMode") as? Bool ?? true
+        window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        window.backgroundColor = isDark
+            ? NSColor.black.withAlphaComponent(0.82)
+            : NSColor.white.withAlphaComponent(0.88)
+        window.center()
+        window.makeKeyAndOrderFront(NSApp)
+        NSApp.activate(ignoringOtherApps: true)
+        analyticsWindow = window
     }
 
     // MARK: - Smart Switch
@@ -896,13 +954,9 @@ final class AppStore: ObservableObject {
         }
 
         tokenUsage     = [:]
-        dailyUsage     = [:]
         costs          = [:]
         forecasts      = [:]
-        projectUsage   = []
-        sessionSummaries = []
-        hourlyActivity = []
-        expensiveTurns = []
+        analyticsSnapshot = .empty(for: analyticsTimeRange)
         paceHistory    = []
         warned80PercentIds = []
 

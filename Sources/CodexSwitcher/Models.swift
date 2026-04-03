@@ -255,19 +255,21 @@ struct ModelTokenUsage: Codable, Equatable {
 
 // MARK: - Daily Usage (for 7-day chart)
 
-struct DailyUsage: Identifiable {
+struct DailyUsage: Identifiable, Equatable, Sendable {
     let dayStart: Date   // start of calendar day (local timezone)
     let tokens: Int      // total input + output tokens for this day
     var id: TimeInterval { dayStart.timeIntervalSince1970 }
 }
 
 enum AnalyticsTimeRange: String, Codable, CaseIterable {
+    case twentyFourHours
     case sevenDays
     case thirtyDays
     case allTime
 
     var title: String {
         switch self {
+        case .twentyFourHours: return "24h"
         case .sevenDays: return "7d"
         case .thirtyDays: return "30d"
         case .allTime: return "All"
@@ -276,9 +278,23 @@ enum AnalyticsTimeRange: String, Codable, CaseIterable {
 
     var dayWindow: Int? {
         switch self {
+        case .twentyFourHours: return 1
         case .sevenDays: return 7
         case .thirtyDays: return 30
         case .allTime: return nil
+        }
+    }
+
+    func cutoffDate(from now: Date) -> Date? {
+        switch self {
+        case .twentyFourHours:
+            return now.addingTimeInterval(-24 * 3600)
+        case .sevenDays:
+            return now.addingTimeInterval(-7 * 24 * 3600)
+        case .thirtyDays:
+            return now.addingTimeInterval(-30 * 24 * 3600)
+        case .allTime:
+            return nil
         }
     }
 }
@@ -355,7 +371,7 @@ struct RateLimitHealthStatus: Sendable {
 
 // MARK: - Codex Insights
 
-struct ProjectUsage: Identifiable {
+struct ProjectUsage: Identifiable, Equatable, Sendable {
     let id: String          // cwd path as stable key
     let name: String        // last path component
     let path: String
@@ -365,7 +381,7 @@ struct ProjectUsage: Identifiable {
     let lastUsed: Date
 }
 
-struct SessionSummary: Identifiable {
+struct SessionSummary: Identifiable, Equatable, Sendable {
     let id: String          // session UUID
     let projectName: String
     let projectPath: String
@@ -377,14 +393,14 @@ struct SessionSummary: Identifiable {
     let parentId: String?   // nil = root session
 }
 
-struct HourlyActivity: Identifiable {
+struct HourlyActivity: Identifiable, Equatable, Sendable {
     let hour: Int           // 0–23
     let dayOfWeek: Int      // 0=Mon … 6=Sun
     let tokens: Int
     var id: String { "\(dayOfWeek)-\(hour)" }
 }
 
-struct ExpensiveTurn: Identifiable {
+struct ExpensiveTurn: Identifiable, Equatable, Sendable {
     let id: String
     let projectName: String
     let promptPreview: String
@@ -395,15 +411,6 @@ struct ExpensiveTurn: Identifiable {
     let model: String
 
     var tokens: Int { inputTokens + outputTokens }
-}
-
-struct CodexInsights {
-    let projects: [ProjectUsage]
-    let sessions: [SessionSummary]
-    let hourlyActivity: [HourlyActivity]
-    let expensiveTurns: [ExpensiveTurn]
-
-    static let empty = CodexInsights(projects: [], sessions: [], hourlyActivity: [], expensiveTurns: [])
 }
 
 // MARK: - Session Event

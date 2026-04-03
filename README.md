@@ -157,6 +157,9 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 - **TR/EN localization sweep** — Recent automation, reliability, and health labels now render consistently in Turkish and English
 - **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
 - **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
+- **Analytics snapshot architecture** — Menubar analytics, deep views, and the new analytics window now read from one shared snapshot model instead of fragmented per-view state
+- **Dedicated analytics window** — Added a separate app window for cost control and operational visibility with summary cards, trends, breakdowns, limit pressure, and alert panels
+- **Analytics engine refactor** — Derived project/session/hourly/top-cost analytics now come from `AnalyticsEngine` over raw usage/session records instead of parser-bound compatibility models
 
 ### v2.1.0
 - **Update status visibility** — Settings area now shows current version, latest version, last checked time, and update state

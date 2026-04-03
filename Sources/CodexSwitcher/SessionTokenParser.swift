@@ -386,6 +386,58 @@ final class SessionTokenParser: @unchecked Sendable {
         return result
     }
 
+    func calculateAnalyticsRecords(
+        profiles: [Profile],
+        history: [SwitchEvent],
+        activeProfileId: UUID?
+    ) -> [AnalyticsUsageRecord] {
+        let deltaCache = loadDeltaCache()
+        let metaCache = refreshSessionMetaCache()
+        guard !deltaCache.isEmpty else { return [] }
+
+        let lastSwitchTime = history.max(by: { $0.timestamp < $1.timestamp })?.timestamp
+        var records: [AnalyticsUsageRecord] = []
+
+        for (sessionPath, deltas) in deltaCache {
+            let meta = metaCache[sessionPath]
+            let projectPath = meta?.cwd.isEmpty == false ? meta?.cwd : nil
+            let resolvedProjectPath = projectPath ?? "unknown"
+            let projectName = resolvedProjectPath == "unknown"
+                ? L("Bilinmiyor", "Unknown")
+                : URL(fileURLWithPath: resolvedProjectPath).lastPathComponent
+            let sessionId = meta?.sessionId ?? URL(fileURLWithPath: sessionPath).lastPathComponent
+
+            for delta in deltas {
+                let profileId: UUID?
+                if let activeProfileId,
+                   let lastSwitch = lastSwitchTime,
+                   delta.timestamp > lastSwitch {
+                    profileId = activeProfileId
+                } else {
+                    profileId = findActiveProfile(at: delta.timestamp, profiles: profiles, history: history)
+                }
+
+                guard let profileId else { continue }
+
+                records.append(
+                    AnalyticsUsageRecord(
+                        timestamp: delta.timestamp,
+                        profileId: profileId,
+                        projectPath: resolvedProjectPath,
+                        projectName: projectName,
+                        sessionId: sessionId,
+                        model: delta.model,
+                        inputTokens: delta.inputDelta,
+                        cachedInputTokens: delta.cachedDelta,
+                        outputTokens: delta.outputDelta
+                    )
+                )
+            }
+        }
+
+        return records.sorted { $0.timestamp < $1.timestamp }
+    }
+
     // MARK: - Cache I/O
 
     private func loadDeltaCache() -> [String: [SessionEventDelta]] {
@@ -415,162 +467,46 @@ final class SessionTokenParser: @unchecked Sendable {
         try? data.write(to: modTimeCacheURL, options: .atomic)
     }
 
-    // MARK: - Insights (Projects / Sessions / Heatmap / Expensive Turns)
-
-    func calculateInsights(range: AnalyticsTimeRange = .allTime) -> CodexInsights {
+    func calculateSessionRecords(range: AnalyticsTimeRange = .allTime) -> [AnalyticsSessionRecord] {
         let metaCache = refreshSessionMetaCache()
-        guard !metaCache.isEmpty else { return .empty }
+        guard !metaCache.isEmpty else { return [] }
 
-        let calendar = Calendar.current
         let cutoff = cutoffDate(for: range)
-        let allMeta: [FilteredSessionMeta] = metaCache.values.compactMap { meta in
+        return metaCache.values.compactMap { meta in
             let filteredTurns = meta.turns.filter { turn in
                 guard let cutoff else { return true }
                 return Date(timeIntervalSince1970: turn.timestamp) > cutoff
             }
             guard !filteredTurns.isEmpty else { return nil }
-            return FilteredSessionMeta(
-                sessionId: meta.sessionId,
-                cwd: meta.cwd,
+
+            let projectPath = meta.cwd.isEmpty ? "unknown" : meta.cwd
+            let projectName = projectPath == "unknown" ? L("Bilinmiyor", "Unknown") : URL(fileURLWithPath: projectPath).lastPathComponent
+
+            return AnalyticsSessionRecord(
+                sessionId: meta.sessionId.isEmpty ? UUID().uuidString : meta.sessionId,
+                projectPath: projectPath,
+                projectName: projectName,
                 firstPrompt: meta.firstPrompt,
                 depth: meta.depth,
                 agentRole: meta.agentRole,
                 parentId: meta.parentId,
-                turns: filteredTurns
+                turns: filteredTurns.map { turn in
+                    AnalyticsSessionTurnRecord(
+                        promptPreview: turn.promptPreview,
+                        inputTokens: turn.inputTokens,
+                        cachedInputTokens: turn.cachedInputTokens,
+                        outputTokens: turn.outputTokens,
+                        timestamp: Date(timeIntervalSince1970: turn.timestamp),
+                        model: turn.model
+                    )
+                }
             )
         }
-
-        // ── 1. Projects ──────────────────────────────────────────────────
-        var projectTokens:   [String: Int]    = [:]
-        var projectCosts:    [String: Double]  = [:]
-        var projectSessions: [String: Int]     = [:]
-        var projectLastUsed: [String: Date]    = [:]
-        var projectName:     [String: String]  = [:]
-
-        let costCalc = CostCalculator()
-
-        for meta in allMeta {
-            let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
-            let name = path == "unknown" ? "Unknown"
-                     : (URL(fileURLWithPath: path).lastPathComponent)
-            let date = Date(timeIntervalSince1970: meta.lastActivityTimestamp)
-
-            projectName[path] = name
-            projectTokens[path, default: 0]   += meta.totalTokens
-            projectSessions[path, default: 0]  += 1
-            if (projectLastUsed[path] ?? .distantPast) < date {
-                projectLastUsed[path] = date
-            }
-            // Cost: use actual input/cached/output split from JSONL token_count events
-            var modelMap: [String: ModelTokenUsage] = [:]
-            for turn in meta.turns {
-                modelMap[turn.model, default: ModelTokenUsage()] += ModelTokenUsage(
-                    inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
-                    outputTokens: turn.outputTokens, sessionCount: 0)
-            }
-            let usage = AccountTokenUsage(
-                inputTokens: meta.turns.reduce(0) { $0 + $1.inputTokens },
-                cachedInputTokens: meta.turns.reduce(0) { $0 + $1.cachedInputTokens },
-                outputTokens: meta.turns.reduce(0) { $0 + $1.outputTokens },
-                reasoningTokens: 0, sessionCount: 0, modelUsage: modelMap)
-            projectCosts[path, default: 0] += costCalc.cost(for: usage)
-        }
-
-        let projects: [ProjectUsage] = projectTokens.keys
-            .map { path in
-                ProjectUsage(
-                    id: path,
-                    name: projectName[path] ?? path,
-                    path: path,
-                    tokens: projectTokens[path] ?? 0,
-                    cost: projectCosts[path] ?? 0,
-                    sessionCount: projectSessions[path] ?? 0,
-                    lastUsed: projectLastUsed[path] ?? .distantPast)
-            }
-            .sorted { $0.tokens > $1.tokens }
-
-        // ── 2. Sessions (sorted newest first) ───────────────────────────
-        let sessions: [SessionSummary] = allMeta
-            .map { meta -> SessionSummary in
-                let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
-                let name = path == "unknown" ? "Unknown"
-                         : URL(fileURLWithPath: path).lastPathComponent
-                return SessionSummary(
-                    id: meta.sessionId.isEmpty ? UUID().uuidString : meta.sessionId,
-                    projectName: name,
-                    projectPath: path,
-                    firstPrompt: meta.firstPrompt,
-                    tokens: meta.totalTokens,
-                    timestamp: Date(timeIntervalSince1970: meta.lastActivityTimestamp),
-                    depth: meta.depth,
-                    agentRole: meta.agentRole,
-                    parentId: meta.parentId)
-            }
-            .sorted { $0.timestamp > $1.timestamp }
-
-        // ── 3. Hourly activity (last 30 days, grouped by dow × hour) ────
-        var hourlyMap: [String: Int] = [:]    // "dow-hour" → tokens
-
-        for meta in allMeta {
-            for turn in meta.turns {
-                let date = Date(timeIntervalSince1970: turn.timestamp)
-                let components = calendar.dateComponents([.weekday, .hour], from: date)
-                // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
-                let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
-                let dow = raw == 0 ? 6 : raw - 1          // 0=Mon…6=Sun
-                let hour = components.hour ?? 0
-                let key = "\(dow)-\(hour)"
-                hourlyMap[key, default: 0] += turn.tokens
-            }
-        }
-
-        var hourlyActivity: [HourlyActivity] = []
-        for dow in 0..<7 {
-            for hour in 0..<24 {
-                let key = "\(dow)-\(hour)"
-                hourlyActivity.append(HourlyActivity(hour: hour, dayOfWeek: dow,
-                                                      tokens: hourlyMap[key] ?? 0))
-            }
-        }
-
-        // ── 4. Expensive turns (top 20 by USD cost) ──────────────────────
-        let allTurns: [ExpensiveTurn] = allMeta.flatMap { meta -> [ExpensiveTurn] in
-            let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
-            let name = path == "unknown" ? "Unknown"
-                     : URL(fileURLWithPath: path).lastPathComponent
-            return meta.turns.compactMap { turn in
-                let turnUsage = AccountTokenUsage(
-                    inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
-                    outputTokens: turn.outputTokens, reasoningTokens: 0,
-                    sessionCount: 0,
-                    modelUsage: [turn.model: ModelTokenUsage(
-                        inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
-                        outputTokens: turn.outputTokens, sessionCount: 0)])
-                let turnCost = costCalc.cost(for: turnUsage)
-                return ExpensiveTurn(
-                    id: "\(meta.sessionId)-\(turn.timestamp)",
-                    projectName: name,
-                    promptPreview: turn.promptPreview,
-                    inputTokens: turn.inputTokens,
-                    outputTokens: turn.outputTokens,
-                    cost: turnCost,
-                    timestamp: Date(timeIntervalSince1970: turn.timestamp),
-                    model: turn.model)
-            }
-        }
-        // Sort by actual USD cost (not total tokens — different models have different rates)
-        let expensiveTurns = Array(allTurns.sorted { $0.cost > $1.cost }.prefix(20))
-
-        return CodexInsights(
-            projects: projects,
-            sessions: sessions,
-            hourlyActivity: hourlyActivity,
-            expensiveTurns: expensiveTurns)
+        .sorted { $0.lastActivity > $1.lastActivity }
     }
 
     private func cutoffDate(for range: AnalyticsTimeRange) -> Date? {
-        guard let days = range.dayWindow else { return nil }
-        return Date().addingTimeInterval(-Double(days) * 24 * 3600)
+        range.cutoffDate(from: Date())
     }
 
     // MARK: - Session Meta Cache

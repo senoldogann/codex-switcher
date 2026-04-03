@@ -3,12 +3,25 @@ import Testing
 @testable import CodexSwitcher
 
 struct AnalyticsRangeTests {
+    private func snapshot(from parser: SessionTokenParser, range: AnalyticsTimeRange) -> AnalyticsSnapshot {
+        AnalyticsEngine().makeSnapshot(
+            range: range,
+            profiles: [],
+            usageRecords: [],
+            sessionRecords: parser.calculateSessionRecords(range: range),
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+    }
+
     @Test
     func calculateInsightsFiltersProjectsBySelectedRange() throws {
         let now = Date()
         let calendar = Calendar.current
         let oldDate = calendar.date(byAdding: .day, value: -45, to: now) ?? now
-        let recentDate = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        let recentDate = calendar.date(byAdding: .hour, value: -30, to: now) ?? now
+        let veryRecentDate = calendar.date(byAdding: .hour, value: -4, to: now) ?? now
         let formatter = ISO8601DateFormatter()
 
         let lines = [
@@ -39,17 +52,34 @@ struct AnalyticsRangeTests {
             {"timestamp":"\(formatter.string(from: recentDate.addingTimeInterval(3)))","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":80,"output_tokens":10}}}}
             """
         ]
+        let latestLines = [
+            """
+            {"timestamp":"\(formatter.string(from: veryRecentDate))","type":"session_meta","payload":{"id":"latest-session","cwd":"/tmp/latest"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: veryRecentDate.addingTimeInterval(1)))","type":"event_msg","payload":{"type":"task_started"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: veryRecentDate.addingTimeInterval(2)))","type":"event_msg","payload":{"type":"user_message","message":"latest prompt"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: veryRecentDate.addingTimeInterval(3)))","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":60,"output_tokens":15}}}}
+            """
+        ]
 
         let fixture = try SessionFixture.make(lines: lines, fileName: "old.jsonl")
         defer { fixture.cleanup() }
         try fixture.writeTestSession(lines: recentLines, fileName: "recent.jsonl")
+        try fixture.writeTestSession(lines: latestLines, fileName: "latest.jsonl")
 
         let parser = fixture.parser()
-        let recentInsights = parser.calculateInsights(range: .sevenDays)
-        let allInsights = parser.calculateInsights(range: .allTime)
+        let dayInsights = snapshot(from: parser, range: .twentyFourHours)
+        let recentInsights = snapshot(from: parser, range: .sevenDays)
+        let allInsights = snapshot(from: parser, range: .allTime)
 
-        #expect(recentInsights.projects.map(\.name) == ["recent"])
-        #expect(Set(allInsights.projects.map(\.name)) == Set(["old", "recent"]))
+        #expect(dayInsights.projects.map(\.name) == ["latest"])
+        #expect(Set(recentInsights.projects.map(\.name)) == Set(["recent", "latest"]))
+        #expect(Set(allInsights.projects.map(\.name)) == Set(["old", "recent", "latest"]))
     }
 
     @Test
@@ -127,7 +157,7 @@ struct AnalyticsRangeTests {
         defer { fixture.cleanup() }
 
         let parser = fixture.parser()
-        let insights = parser.calculateInsights(range: .sevenDays)
+        let insights = snapshot(from: parser, range: .sevenDays)
 
         #expect(insights.projects.map(\.name) == ["long-lived"])
         #expect(insights.expensiveTurns.count == 1)
