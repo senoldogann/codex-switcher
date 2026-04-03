@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isDark = UserDefaults.standard.object(forKey: "isDarkMode") as? Bool ?? true
         popover.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
 
-        popover.contentSize = NSSize(width: 340, height: 500)
+        popover.contentSize = NSSize(width: 400, height: 500)
     }
 
     @objc func handleAppearanceChanged() {

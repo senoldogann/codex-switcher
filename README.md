@@ -139,6 +139,7 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ### v2.1.1
 - **Left rail navigation** — Reworked the menu actions into a compact vertical sidebar while preserving the existing glass styling
+- **Sidebar proportion polish** — Increased popover width and tightened the rail so account cards keep a cleaner, less cramped layout
 - **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
 - **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
 

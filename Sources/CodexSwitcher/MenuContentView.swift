@@ -719,7 +719,7 @@ struct MenuContentView: View {
             }
             .padding(.bottom, 10)
         }
-        .frame(width: 84)
+        .frame(width: 68)
     }
 
     private var updateStatusStrip: some View {
@@ -837,19 +837,19 @@ struct MenuContentView: View {
                 .font(.system(size: 12, weight: selected ? .semibold : .medium))
 
             Text(label)
-                .font(.system(size: 8, weight: selected ? .semibold : .medium))
+                .font(.system(size: 7, weight: selected ? .semibold : .medium))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 52)
+        .frame(height: 46)
         .foregroundStyle(foreground)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(selected ? gw.opacity(0.06) : .clear)
         )
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .contentShape(Rectangle())
     }
 
