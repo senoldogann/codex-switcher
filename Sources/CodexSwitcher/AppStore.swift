@@ -795,15 +795,41 @@ final class AppStore: ObservableObject {
     // MARK: - Statistics Reset
 
     func resetStatistics() {
+        let alert = NSAlert()
+        alert.messageText = L("İstatistikleri sıfırla?", "Reset statistics?")
+        alert.informativeText = L(
+            "Tüm token ve maliyet geçmişi silinecek. Bu işlem geri alınamaz.",
+            "All token and cost history will be deleted. This cannot be undone.")
+        alert.addButton(withTitle: L("Sıfırla", "Reset"))
+        alert.addButton(withTitle: L("İptal", "Cancel"))
+        alert.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
         let cacheDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex-switcher/cache")
-        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("event-deltas-v2.json"))
-        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json"))
-        try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent("token-usage.json.mod"))
-        tokenUsage = [:]
-        costs = [:]
-        forecasts = [:]
+        let filesToDelete = [
+            "event-deltas-v2.json",
+            "token-usage.json.mod",
+            "session-meta-v2.json",
+            "session-meta-v2.mod"
+        ]
+        for name in filesToDelete {
+            try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(name))
+        }
+
+        tokenUsage     = [:]
+        dailyUsage     = [:]
+        costs          = [:]
+        forecasts      = [:]
+        projectUsage   = []
+        sessionSummaries = []
+        hourlyActivity = []
+        expensiveTurns = []
+        paceHistory    = []
         warned80PercentIds = []
+
+        refreshTokenUsage()
     }
 
     // MARK: - Re-login for Stale Accounts

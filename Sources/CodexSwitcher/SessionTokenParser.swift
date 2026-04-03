@@ -502,7 +502,7 @@ final class SessionTokenParser: @unchecked Sendable {
                     model: turn.model)
             }
         }
-        let expensiveTurns = Array(allTurns.sorted { $0.tokens > $1.tokens }.prefix(30))
+        let expensiveTurns = Array(allTurns.sorted { $0.tokens > $1.tokens }.prefix(20))
 
         return CodexInsights(
             projects: projects,
