@@ -28,8 +28,6 @@ final class AppStore: ObservableObject {
     @Published var isSessionActive: Bool = false  // live session indicator
 
     @Published var availableUpdate: UpdateChecker.Release? = nil
-    @Published var pendingProvider: AIProvider = .codex
-
     @Published var projectUsage: [ProjectUsage] = []
     @Published var sessionSummaries: [SessionSummary] = []
     @Published var hourlyActivity: [HourlyActivity] = []
@@ -37,7 +35,6 @@ final class AppStore: ObservableObject {
 
     private var lastBudgetAlertDate: Date?
     private var lastWeeklySummaryDate: Date?
-    private var claudeAuthPoller: Timer?
 
     func checkForUpdates() {
         Task {
@@ -160,9 +157,6 @@ final class AppStore: ObservableObject {
 
         let activeProfileId = activeProfile?.id
         let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
-            // Claude Code profiles use a different auth system — skip Codex rate limit API
-            guard profile.aiProvider == .codex else { return nil }
-            // Aktif hesap için her zaman live ~/.codex/auth.json'u kullan (en güncel token)
             let dict: [String: Any]?
             if profile.id == activeProfileId,
                let liveDict = profileManager.readLiveAuthDict() {
@@ -408,11 +402,8 @@ final class AppStore: ObservableObject {
     /// Rate limit verisine göre en iyi hesabı seçer.
     /// Auto modda tüm hesaplar tükenirse nil döner → allExhausted tetiklenir.
     private func smartNextProfile(auto: Bool) -> Profile? {
-        let activeProvider = activeProfile?.aiProvider ?? .codex
-        // Only switch between profiles of the same AI provider.
-        // A Codex rate-limit trigger must not land on a Claude Code account and vice versa.
         let candidates = profiles.filter {
-            $0.id != activeProfile?.id && $0.aiProvider == activeProvider
+            $0.id != activeProfile?.id
         }
         guard !candidates.isEmpty else { return nil }
 
@@ -481,9 +472,7 @@ final class AppStore: ObservableObject {
                 finalizeActivation(candidate, reason: reason)
             case .failed:
                 // One retry: re-read credential source (in case of race with external writer)
-                let retryResult = candidate.aiProvider == .claudeCode
-                    ? profileManager.verifyClaudeCodeAccount(expectedAccountId: candidate.accountId)
-                    : profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
+                let retryResult = profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
                 switch retryResult {
                 case .verified:
                     finalizeActivation(candidate, reason: reason)
@@ -526,18 +515,7 @@ final class AppStore: ObservableObject {
     // MARK: - AI Restart
 
     private func restartAIIfRunning(for profile: Profile) {
-        switch profile.aiProvider {
-        case .codex:      restartCodexIfRunning()
-        case .claudeCode: notifyClaudeSessionRestart()
-        }
-    }
-
-    /// Claude Code is a CLI — notify user to restart their session.
-    private func notifyClaudeSessionRestart() {
-        sendNotification(
-            title: L("Claude kimlik bilgileri güncellendi", "Claude credentials updated"),
-            body:  L("Aktif claude oturumlarını yeniden başlatın.", "Please restart any active claude sessions.")
-        )
+        restartCodexIfRunning()
     }
 
     private func restartCodexIfRunning() {
@@ -672,20 +650,12 @@ final class AppStore: ObservableObject {
 
     func closeAddAccountWindow() { addAccountWindow?.close() }
 
-    func beginAddAccount(provider: AIProvider = .codex) {
-        pendingProvider = provider
+    func beginAddAccount() {
         isAddingAccount = true
         addingStep = .waitingLogin
 
-        switch provider {
-        case .codex:
-            openTerminalWithCodexLogin()
-            watchAuthFileForNewLogin()
-        case .claudeCode:
-            openTerminalWithClaudeLogin()
-            let previousData = ClaudeCodeManager.readCredentialsData()
-            startClaudeKeychainPoller(previousData: previousData)
-        }
+        openTerminalWithCodexLogin()
+        watchAuthFileForNewLogin()
 
         cancelLoginTimeout()
         let timeout = DispatchWorkItem { [weak self] in self?.loginTimedOut() }
@@ -693,23 +663,9 @@ final class AppStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeout)
     }
 
-    private func openTerminalWithClaudeLogin() {
-        // claude auth login is interactive — must run inside a visible Terminal window.
-        // Use the shell's login environment so user PATH (~/.local/bin, /opt/homebrew/bin, etc.) is resolved.
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "claude auth login"
-        end tell
-        """
-        var err: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&err)
-    }
-
     /// Finds a CLI binary using the user's login shell PATH.
     /// Falls back through common install locations if the shell lookup fails.
     private func findCLIPath(_ name: String) -> String {
-        // Use zsh login shell so ~/.zprofile / ~/.zshrc paths (Homebrew, npm, etc.) are loaded
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/zsh")
         task.arguments = ["-l", "-c", "which \(name)"]
@@ -722,7 +678,6 @@ final class AppStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !raw.isEmpty { return raw }
 
-        // Common install locations as fallback
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
             "\(home)/.local/bin/\(name)",
@@ -732,31 +687,6 @@ final class AppStore: ObservableObject {
         ]
         return candidates.first { FileManager.default.fileExists(atPath: $0) }
             ?? "/usr/local/bin/\(name)"
-    }
-
-    private func startClaudeKeychainPoller(previousData: Data?) {
-        claudeAuthPoller?.invalidate()
-        claudeAuthPoller = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            guard let newData = ClaudeCodeManager.readCredentialsData() else { return }
-            if newData != previousData {
-                self.claudeAuthPoller?.invalidate()
-                self.claudeAuthPoller = nil
-                self.claudeKeychainUpdated(data: newData)
-            }
-        }
-    }
-
-    private func claudeKeychainUpdated(data: Data) {
-        guard addingStep == .waitingLogin else { return }
-        // Claude Code uses opaque (non-JWT) tokens — email may not be parseable.
-        // Fall back to subscription type label so the flow can always advance.
-        let email = ClaudeCodeManager.parseEmail(from: data)
-            ?? ClaudeCodeManager.parseDisplayLabel(from: data)
-            ?? "Claude Code"
-        pendingProfileEmail = email
-        cancelLoginTimeout()
-        addingStep = .confirmProfile
     }
 
     private func cancelLoginTimeout() {
@@ -773,7 +703,7 @@ final class AppStore: ObservableObject {
     }
 
     func confirmPendingProfile(alias: String) {
-        guard let newProfile = profileManager.captureCurrentAuth(alias: alias, provider: pendingProvider) else {
+        guard let newProfile = profileManager.captureCurrentAuth(alias: alias) else {
             cancelAddAccount()
             return
         }
@@ -800,8 +730,6 @@ final class AppStore: ObservableObject {
 
     func cancelAddAccount() {
         cancelLoginTimeout()
-        claudeAuthPoller?.invalidate()
-        claudeAuthPoller = nil
         isAddingAccount = false
         addingStep = .idle
         pendingProfileEmail = ""

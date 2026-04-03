@@ -9,8 +9,13 @@ let package = Package(
             name: "CodexSwitcher",
             path: "Sources/CodexSwitcher",
             resources: [
-                .copy("Resources/codex.icns")
+                .copy("Resources/codex.icns"),
+                .copy("Resources/AppIcon.icns")
             ]
+        ),
+        .testTarget(
+            name: "CodexSwitcherTests",
+            dependencies: ["CodexSwitcher"]
         )
     ]
 )

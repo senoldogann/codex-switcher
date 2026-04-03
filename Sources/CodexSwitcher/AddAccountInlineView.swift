@@ -5,7 +5,6 @@ import SwiftUI
 struct AddAccountInlineView: View {
     @EnvironmentObject var store: AppStore
     @State private var aliasText = ""
-    @State private var selectedProvider: AIProvider = .codex
     @FocusState private var aliasFocused: Bool
     @State private var pulsePhase: CGFloat = 0
 
@@ -62,13 +61,6 @@ struct AddAccountInlineView: View {
                     .lineSpacing(2)
             }
 
-            // Provider picker
-            HStack(spacing: 6) {
-                ForEach(AIProvider.allCases, id: \.self) { provider in
-                    providerPill(provider)
-                }
-            }
-
             HStack(spacing: 8) {
                 Button(Str.cancel) { store.cancelAddAccount() }
                     .font(.system(size: 11, weight: .medium))
@@ -79,30 +71,10 @@ struct AddAccountInlineView: View {
                     .buttonStyle(.plain)
 
                 glassButton(Str.start, icon: "arrow.right") {
-                    store.beginAddAccount(provider: selectedProvider)
+                    store.beginAddAccount()
                 }
             }
         }
-    }
-
-    private func providerPill(_ provider: AIProvider) -> some View {
-        let selected = selectedProvider == provider
-        let color: Color = provider == .claudeCode ? .orange : .blue
-        return Button { selectedProvider = provider } label: {
-            HStack(spacing: 4) {
-                Image(systemName: provider == .claudeCode ? "brain.filled.head.profile" : "sparkle")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(provider.displayName)
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(selected ? color : gw.opacity(0.35))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(selected ? color.opacity(0.12) : gw.opacity(0.04), in: .capsule)
-            .overlay(Capsule().stroke(selected ? color.opacity(0.3) : gw.opacity(0.08), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
     }
 
     // MARK: - Waiting

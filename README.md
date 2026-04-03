@@ -1,6 +1,6 @@
 # CodexSwitcher
 
-A macOS menu bar app that manages multiple OpenAI Codex and Claude Code accounts, automatically switches between them when usage limits are reached, and gives you deep analytics on your AI coding sessions.
+A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically switches between them when usage limits are reached, and gives you deep analytics on your AI coding sessions.
 
 ![macOS](https://img.shields.io/badge/macOS-26%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
@@ -17,7 +17,6 @@ A macOS menu bar app that manages multiple OpenAI Codex and Claude Code accounts
 ### Account Management
 - **Auto-switching** — Detects rate limits via API and switches to the best available account automatically
 - **Smart selection** — Picks the account with the lowest weekly usage %, not round-robin
-- **Multi-AI support** — Manage both **OpenAI Codex** and **Claude Code** accounts side by side
 - **Codex auto-restart** — Force-quits and relaunches Codex after every switch (no manual exit needed)
 - **Switch verification** — Post-switch confirmation with automatic rollback on failure
 - **Re-login flow** — Refresh stale tokens without leaving the app
@@ -39,7 +38,7 @@ A macOS menu bar app that manages multiple OpenAI Codex and Claude Code accounts
 - **Projects** — All-time per-project token and cost breakdown with progress bars; drill down into sessions per project; CSV export
 - **Sessions** — Full session list with search, parent/child threading, agent role badges (reviewer, explorer, worker)
 - **Heatmap** — 7-day × 24-hour activity heatmap showing when you code most
-- **Top $** — Top 20 most expensive prompts ranked by token count
+- **Top $** — Top 20 most expensive prompts ranked by USD cost
 - **Chart** — 7-day daily token usage chart per account
 
 ### UI & UX
@@ -56,8 +55,7 @@ A macOS menu bar app that manages multiple OpenAI Codex and Claude Code accounts
 ## Requirements
 
 - macOS 26 (Tahoe) or later
-- [OpenAI Codex CLI](https://github.com/openai/codex) installed (for Codex accounts)
-- [Claude Code CLI](https://github.com/anthropics/claude-code) installed (for Claude accounts)
+- [OpenAI Codex CLI](https://github.com/openai/codex) installed
 
 ---
 
@@ -94,18 +92,10 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Adding Accounts
 
-### Codex
-1. Click **+ Add Account** → select **Codex**
+1. Click **+ Add Account**
 2. Browser opens automatically for OAuth sign-in
 3. Sign in — CodexSwitcher detects the new credentials automatically
 4. Give the account an alias → click **Save**
-
-### Claude Code
-1. Click **+ Add Account** → select **Claude Code**
-2. Terminal opens and runs `claude auth login`
-3. Complete the browser OAuth flow
-4. CodexSwitcher detects the Keychain update automatically
-5. Give the account an alias → click **Save**
 
 ---
 
@@ -130,6 +120,11 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ---
 
 ## Changelog
+
+### v2.0.0
+- **Codex-only focus** — Removed Claude Code support; streamlined for OpenAI Codex account management
+- **Simplified architecture** — Removed multi-provider abstraction; cleaner codebase, faster builds
+- **All existing features preserved** — Rate limit bars, forecasting, token tracking, insights, budget alerts
 
 ### v1.14.0
 - **Multi-AI support** — Add and manage Claude Code accounts alongside Codex accounts; credentials stored in Keychain
@@ -173,9 +168,8 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 | File | Responsibility |
 |------|---------------|
-| `AppStore.swift` | Central state, profile CRUD, smart switching, rate limit polling, AI restart |
-| `ProfileManager.swift` | Auth file + Keychain management, verification, backup/rollback |
-| `ClaudeCodeManager.swift` | Keychain read/write for Claude Code credentials |
+| `AppStore.swift` | Central state, profile CRUD, smart switching, rate limit polling, Codex restart |
+| `ProfileManager.swift` | Auth file management, verification, backup/rollback |
 | `SessionTokenParser.swift` | Per-event delta attribution, Insights calculation (projects/sessions/heatmap) |
 | `RateLimitFetcher.swift` | API polling for rate limit data |
 | `RateLimitForecaster.swift` | Usage pace analysis and exhaustion prediction |

@@ -41,6 +41,7 @@ final class SessionTokenParser: @unchecked Sendable {
         struct CachedTurn: Codable {
             let promptPreview: String
             let inputTokens: Int
+            let cachedInputTokens: Int
             let outputTokens: Int
             let timestamp: Double      // timeIntervalSince1970
             let model: String
@@ -50,21 +51,21 @@ final class SessionTokenParser: @unchecked Sendable {
         }
     }
 
-    init() {
-        sessionsDir = FileManager.default.homeDirectoryForCurrentUser
+    init(sessionsDir: URL? = nil, cacheBaseDir: URL? = nil) {
+        self.sessionsDir = sessionsDir ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions")
         iso8601 = ISO8601DateFormatter()
         iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        let base = FileManager.default.homeDirectoryForCurrentUser
+        let base = cacheBaseDir ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex-switcher")
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         cacheDir = base.appendingPathComponent("cache")
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         deltaCacheURL = cacheDir.appendingPathComponent("event-deltas-v2.json")
         modTimeCacheURL = cacheDir.appendingPathComponent("token-usage.json.mod")
-        sessionMetaCacheURL = cacheDir.appendingPathComponent("session-meta-v2.json")
-        sessionModTimeCacheURL = cacheDir.appendingPathComponent("session-meta-v2.mod")
+        sessionMetaCacheURL = cacheDir.appendingPathComponent("session-meta-v3.json")
+        sessionModTimeCacheURL = cacheDir.appendingPathComponent("session-meta-v3.mod")
     }
 
     // MARK: - Public
@@ -415,16 +416,16 @@ final class SessionTokenParser: @unchecked Sendable {
             if (projectLastUsed[path] ?? .distantPast) < date {
                 projectLastUsed[path] = date
             }
-            // Cost: use actual input/output split from JSONL token_count events
+            // Cost: use actual input/cached/output split from JSONL token_count events
             var modelMap: [String: ModelTokenUsage] = [:]
             for turn in meta.turns {
                 modelMap[turn.model, default: ModelTokenUsage()] += ModelTokenUsage(
-                    inputTokens: turn.inputTokens, cachedInputTokens: 0,
+                    inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
                     outputTokens: turn.outputTokens, sessionCount: 0)
             }
             let usage = AccountTokenUsage(
                 inputTokens: meta.turns.reduce(0) { $0 + $1.inputTokens },
-                cachedInputTokens: 0,
+                cachedInputTokens: meta.turns.reduce(0) { $0 + $1.cachedInputTokens },
                 outputTokens: meta.turns.reduce(0) { $0 + $1.outputTokens },
                 reasoningTokens: 0, sessionCount: 0, modelUsage: modelMap)
             projectCosts[path, default: 0] += costCalc.cost(for: usage)
@@ -487,22 +488,33 @@ final class SessionTokenParser: @unchecked Sendable {
             }
         }
 
-        // ── 4. Expensive turns (top 20) ──────────────────────────────────
+        // ── 4. Expensive turns (top 20 by USD cost) ──────────────────────
         let allTurns: [ExpensiveTurn] = metaCache.values.flatMap { meta -> [ExpensiveTurn] in
             let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
             let name = path == "unknown" ? "Unknown"
                      : URL(fileURLWithPath: path).lastPathComponent
             return meta.turns.map { turn in
-                ExpensiveTurn(
+                let turnUsage = AccountTokenUsage(
+                    inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
+                    outputTokens: turn.outputTokens, reasoningTokens: 0,
+                    sessionCount: 0,
+                    modelUsage: [turn.model: ModelTokenUsage(
+                        inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
+                        outputTokens: turn.outputTokens, sessionCount: 0)])
+                let turnCost = costCalc.cost(for: turnUsage)
+                return ExpensiveTurn(
                     id: "\(meta.sessionId)-\(turn.timestamp)",
                     projectName: name,
                     promptPreview: turn.promptPreview,
-                    tokens: turn.tokens,
+                    inputTokens: turn.inputTokens,
+                    outputTokens: turn.outputTokens,
+                    cost: turnCost,
                     timestamp: Date(timeIntervalSince1970: turn.timestamp),
                     model: turn.model)
             }
         }
-        let expensiveTurns = Array(allTurns.sorted { $0.tokens > $1.tokens }.prefix(20))
+        // Sort by actual USD cost (not total tokens — different models have different rates)
+        let expensiveTurns = Array(allTurns.sorted { $0.cost > $1.cost }.prefix(20))
 
         return CodexInsights(
             projects: projects,
@@ -564,6 +576,7 @@ final class SessionTokenParser: @unchecked Sendable {
         var currentTurnModel  = "gpt-5"
         var currentTurnTs: Double = 0
         var prevInput  = 0
+        var prevCached = 0
         var prevOutput = 0
         var turns: [SessionFileMeta.CachedTurn] = []
         var sessionMetaParsed = false
@@ -610,7 +623,8 @@ final class SessionTokenParser: @unchecked Sendable {
             // ── turn_context: model update ─────────────────────────────
             if type == "turn_context" {
                 if let payload = json["payload"] as? [String: Any],
-                   let model = payload["model"] as? String {
+                   let model = payload["model"] as? String
+                    ?? (payload["info"] as? [String: Any])?["model"] as? String {
                     currentTurnModel = normalizeModel(model)
                 }
                 continue
@@ -645,17 +659,30 @@ final class SessionTokenParser: @unchecked Sendable {
             // ── token_count: compute per-turn delta ─────────────────────
             if payloadType == "token_count",
                let info = payload["info"] as? [String: Any] {
-                var dInput = 0; var dOutput = 0
+                let modelFromInfo = info["model"] as? String ?? info["model_name"] as? String
+                let modelFromPayload = payload["model"] as? String
+                let modelFromRoot = json["model"] as? String
+                if let model = modelFromInfo ?? modelFromPayload ?? modelFromRoot {
+                    currentTurnModel = normalizeModel(model)
+                }
+
+                var dInput = 0
+                var dCached = 0
+                var dOutput = 0
 
                 if let total = info["total_token_usage"] as? [String: Any] {
                     let curInput  = toInt(total["input_tokens"])
+                    let curCached = toInt(total["cached_input_tokens"] ?? total["cache_read_input_tokens"])
                     let curOutput = toInt(total["output_tokens"])
                     dInput  = max(0, curInput  - prevInput)
+                    dCached = max(0, curCached - prevCached)
                     dOutput = max(0, curOutput - prevOutput)
                     prevInput  = curInput
+                    prevCached = curCached
                     prevOutput = curOutput
                 } else if let last = info["last_token_usage"] as? [String: Any] {
                     dInput  = max(0, toInt(last["input_tokens"]))
+                    dCached = max(0, toInt(last["cached_input_tokens"] ?? last["cache_read_input_tokens"]))
                     dOutput = max(0, toInt(last["output_tokens"]))
                 }
 
@@ -663,6 +690,7 @@ final class SessionTokenParser: @unchecked Sendable {
                     turns.append(SessionFileMeta.CachedTurn(
                         promptPreview: currentTurnPrompt,
                         inputTokens: dInput,
+                        cachedInputTokens: min(dCached, dInput),
                         outputTokens: dOutput,
                         timestamp: ts > 0 ? ts : currentTurnTs,
                         model: currentTurnModel))
@@ -726,19 +754,6 @@ final class SessionTokenParser: @unchecked Sendable {
     }
 
     private func normalizeModel(_ raw: String) -> String {
-        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("openai/") {
-            trimmed = String(trimmed.dropFirst("openai/".count))
-        }
-        if let datedSuffix = trimmed.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) {
-            let base = String(trimmed[..<datedSuffix.lowerBound])
-            let knownModels = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro",
-                               "gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini",
-                               "gpt-5.2", "gpt-5.2-codex", "gpt-5.2-pro",
-                               "gpt-5.3-codex", "gpt-5.3-codex-spark",
-                               "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro"]
-            if knownModels.contains(base) { return base }
-        }
-        return trimmed
+        ModelPricing.normalizeModel(raw)
     }
 }

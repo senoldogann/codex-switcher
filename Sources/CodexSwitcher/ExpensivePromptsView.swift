@@ -6,8 +6,8 @@ struct ExpensivePromptsView: View {
 
     private var gw: Color { scheme == .dark ? .white : .black }
 
-    private var maxTokens: Int {
-        store.expensiveTurns.first?.tokens ?? 1
+    private var metrics: ExpensiveTurnMetrics {
+        ExpensiveTurnMetrics(turns: store.expensiveTurns)
     }
 
     var body: some View {
@@ -52,6 +52,10 @@ struct ExpensivePromptsView: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(gw.opacity(0.25))
 
+                    Text(ExpensiveTurnMetrics.formatCost(turn.cost))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(rankColor(rank).opacity(0.85))
+
                     Spacer(minLength: 0)
 
                     Text(turn.timestamp, style: .relative)
@@ -72,12 +76,12 @@ struct ExpensivePromptsView: View {
                         Capsule().fill(gw.opacity(0.06))
                         Capsule()
                             .fill(rankColor(rank).opacity(0.55))
-                            .frame(width: max(4, geo.size.width * tokenFraction(turn.tokens)))
+                            .frame(width: max(4, geo.size.width * CGFloat(metrics.costFraction(for: turn))))
                     }
                 }
                 .frame(height: 3)
 
-                Text(formatTokens(turn.tokens) + " tokens")
+                Text(ExpensiveTurnMetrics.formatTokens(turn.tokens) + " tok")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(rankColor(rank).opacity(0.65))
             }
@@ -87,11 +91,6 @@ struct ExpensivePromptsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func tokenFraction(_ tokens: Int) -> CGFloat {
-        guard maxTokens > 0 else { return 0 }
-        return CGFloat(tokens) / CGFloat(maxTokens)
-    }
-
     private func rankColor(_ rank: Int) -> Color {
         switch rank {
         case 1:  return .orange
@@ -99,11 +98,5 @@ struct ExpensivePromptsView: View {
         case 3:  return Color(red: 0.8, green: 0.6, blue: 0.3) // bronze
         default: return .blue
         }
-    }
-
-    private func formatTokens(_ n: Int) -> String {
-        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
-        if n >= 1_000     { return String(format: "%.1fK", Double(n) / 1_000) }
-        return "\(n)"
     }
 }

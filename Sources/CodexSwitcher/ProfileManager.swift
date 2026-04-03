@@ -110,13 +110,6 @@ final class ProfileManager: @unchecked Sendable {
             .appendingPathExtension("json")
     }
 
-    /// Path for Claude Code credential blob (separate from Codex auth JSON)
-    func claudeAuthPath(for profile: Profile) -> URL {
-        Self.profilesDir
-            .appendingPathComponent(profile.id.uuidString)
-            .appendingPathExtension("claudeauth")
-    }
-
     // MARK: - Auth Read Helpers
 
     func readAuthDict(for profile: Profile) -> [String: Any]? {
@@ -129,16 +122,9 @@ final class ProfileManager: @unchecked Sendable {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    // MARK: - Capture Current Auth (provider-aware)
+    // MARK: - Capture Current Auth
 
-    func captureCurrentAuth(alias: String, provider: AIProvider = .codex) -> Profile? {
-        switch provider {
-        case .codex:      return captureCodexAuth(alias: alias)
-        case .claudeCode: return captureClaudeCodeAuth(alias: alias)
-        }
-    }
-
-    private func captureCodexAuth(alias: String) -> Profile? {
+    func captureCurrentAuth(alias: String) -> Profile? {
         guard let data = try? Data(contentsOf: Self.codexAuthPath),
               let authDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tokens = authDict["tokens"] as? [String: Any],
@@ -152,35 +138,10 @@ final class ProfileManager: @unchecked Sendable {
         return profile
     }
 
-    func captureClaudeCodeAuth(alias: String) -> Profile? {
-        guard let data = ClaudeCodeManager.readCredentialsData() else { return nil }
-
-        // Claude Code uses opaque tokens — email may not be in the token.
-        // Fall back to display label or a generic string.
-        let email = ClaudeCodeManager.parseEmail(from: data)
-            ?? ClaudeCodeManager.parseDisplayLabel(from: data)
-            ?? "Claude Code"
-
-        // Account ID: orgUuid > token prefix (stable enough for dedup)
-        let accountId = ClaudeCodeManager.parseAccountId(from: data) ?? UUID().uuidString
-
-        let profile = Profile(id: UUID(), alias: alias, email: email,
-                              accountId: accountId, addedAt: Date(), aiProvider: .claudeCode)
-        try? data.write(to: claudeAuthPath(for: profile), options: .atomic)
-        return profile
-    }
-
-    // MARK: - Activate (provider-aware)
+    // MARK: - Activate
 
     @discardableResult
     func activate(profile: Profile) throws -> VerifyResult {
-        switch profile.aiProvider {
-        case .codex:      return try activateCodex(profile: profile)
-        case .claudeCode: return try activateClaudeCode(profile: profile)
-        }
-    }
-
-    private func activateCodex(profile: Profile) throws -> VerifyResult {
         let src = authPath(for: profile)
         guard FileManager.default.fileExists(atPath: src.path) else {
             throw SwitcherError.missingAuthFile(profile.email)
@@ -217,26 +178,6 @@ final class ProfileManager: @unchecked Sendable {
         return verifyResult
     }
 
-    private func activateClaudeCode(profile: Profile) throws -> VerifyResult {
-        let path = claudeAuthPath(for: profile)
-        guard FileManager.default.fileExists(atPath: path.path),
-              let data = try? Data(contentsOf: path) else {
-            throw SwitcherError.missingAuthFile(profile.email)
-        }
-        guard ClaudeCodeManager.writeCredentialsData(data) else {
-            throw SwitcherError.activationFailed(profile.email)
-        }
-        // Verify by reading back
-        guard let written = ClaudeCodeManager.readCredentialsData(),
-              let actualId = ClaudeCodeManager.parseAccountId(from: written) else {
-            return .failed(.jwtParseFailed)
-        }
-        return actualId == profile.accountId ? .verified
-             : .failed(.mismatch(expected: profile.accountId, actual: actualId))
-    }
-
-    // MARK: - Verify Active Account
-
     func verifyActiveAccount(expectedAccountId: String) -> VerifyResult {
         guard FileManager.default.fileExists(atPath: Self.codexAuthPath.path) else {
             return .failed(.fileMissing)
@@ -255,16 +196,8 @@ final class ProfileManager: @unchecked Sendable {
              : .failed(.mismatch(expected: expectedAccountId, actual: actualId))
     }
 
-    func verifyClaudeCodeAccount(expectedAccountId: String) -> VerifyResult {
-        guard let data = ClaudeCodeManager.readCredentialsData() else { return .failed(.fileMissing) }
-        guard let actualId = ClaudeCodeManager.parseAccountId(from: data) else { return .failed(.jwtParseFailed) }
-        return actualId == expectedAccountId ? .verified
-             : .failed(.mismatch(expected: expectedAccountId, actual: actualId))
-    }
-
     func deleteProfile(_ profile: Profile) {
         try? FileManager.default.removeItem(at: authPath(for: profile))
-        try? FileManager.default.removeItem(at: claudeAuthPath(for: profile))
     }
 
     // MARK: - JWT Helpers

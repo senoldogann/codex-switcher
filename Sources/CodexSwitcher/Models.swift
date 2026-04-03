@@ -3,38 +3,16 @@ import Foundation
 // MARK: - AI Provider
 
 enum AIProvider: String, Codable, CaseIterable {
-    case codex      = "codex"
-    case claudeCode = "claudeCode"
+    case codex = "codex"
 
-    var displayName: String {
-        switch self {
-        case .codex:      return "Codex"
-        case .claudeCode: return "Claude"
-        }
-    }
-
-    var shortBadge: String {
-        switch self {
-        case .codex:      return "CX"
-        case .claudeCode: return "CC"
-        }
-    }
+    var displayName: String { "Codex" }
+    var shortBadge: String { "CX" }
 
     /// OS process name used to find/kill the running app
-    var processName: String {
-        switch self {
-        case .codex:      return "Codex"
-        case .claudeCode: return "claude"
-        }
-    }
+    var processName: String { "Codex" }
 
     /// Login command run in background to trigger auth
-    var loginCommand: [String] {
-        switch self {
-        case .codex:      return ["codex", "login"]
-        case .claudeCode: return ["claude", "auth", "login"]
-        }
-    }
+    var loginCommand: [String] { ["codex", "login"] }
 }
 
 // MARK: - Profile
@@ -49,13 +27,13 @@ struct Profile: Identifiable, Codable, Equatable {
     var lastKnownTurns: Int?
     var aiProvider: AIProvider
 
-    init(id: UUID = UUID(), alias: String, email: String, accountId: String,
+     init(id: UUID = UUID(), alias: String, email: String, accountId: String,
          addedAt: Date, activatedAt: Date? = nil, lastKnownTurns: Int? = nil,
          aiProvider: AIProvider = .codex) {
         self.id = id; self.alias = alias; self.email = email
         self.accountId = accountId; self.addedAt = addedAt
         self.activatedAt = activatedAt; self.lastKnownTurns = lastKnownTurns
-        self.aiProvider = aiProvider
+        self.aiProvider = .codex
     }
 
     // Backward-compatible decoder: old profiles missing aiProvider default to .codex
@@ -199,9 +177,13 @@ struct ExpensiveTurn: Identifiable {
     let id: String
     let projectName: String
     let promptPreview: String
-    let tokens: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let cost: Double
     let timestamp: Date
     let model: String
+
+    var tokens: Int { inputTokens + outputTokens }
 }
 
 struct CodexInsights {
