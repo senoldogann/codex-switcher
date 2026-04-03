@@ -7,12 +7,14 @@ enum AIProvider: String, Codable, CaseIterable {
 
     var displayName: String { "Codex" }
     var shortBadge: String { "CX" }
-
-    /// OS process name used to find/kill the running app
     var processName: String { "Codex" }
-
-    /// Login command run in background to trigger auth
     var loginCommand: [String] { ["codex", "login"] }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = AIProvider(rawValue: raw) ?? .codex
+    }
 }
 
 // MARK: - Profile
