@@ -1,5 +1,44 @@
 import SwiftUI
 
+struct SessionExplorerTreeBuilder {
+    struct Row: Identifiable {
+        let session: SessionSummary
+        let indent: Int
+
+        var id: String { session.id }
+    }
+
+    static func flatten(_ sessions: [SessionSummary]) -> [Row] {
+        let byId = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let childrenOf = Dictionary(grouping: sessions) { $0.parentId }
+        let roots = sessions
+            .filter { session in
+                guard let parentId = session.parentId else { return true }
+                return byId[parentId] == nil
+            }
+            .sorted { $0.timestamp > $1.timestamp }
+
+        var flattened: [Row] = []
+        for root in roots {
+            append(session: root, indent: 0, childrenOf: childrenOf, into: &flattened)
+        }
+        return flattened
+    }
+
+    private static func append(
+        session: SessionSummary,
+        indent: Int,
+        childrenOf: [String?: [SessionSummary]],
+        into flattened: inout [Row]
+    ) {
+        flattened.append(Row(session: session, indent: indent))
+        let children = (childrenOf[session.id] ?? []).sorted { $0.timestamp > $1.timestamp }
+        for child in children {
+            append(session: child, indent: indent + 1, childrenOf: childrenOf, into: &flattened)
+        }
+    }
+}
+
 struct SessionExplorerView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) private var scheme
@@ -16,26 +55,8 @@ struct SessionExplorerView: View {
         }
     }
 
-    /// Root sessions + their children grouped together
-    private var trees: [(root: SessionSummary, children: [SessionSummary])] {
-        let all = filteredSessions
-        let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
-
-        var childrenOf: [String: [SessionSummary]] = [:]
-        var roots: [SessionSummary] = []
-
-        for session in all {
-            if let parentId = session.parentId, byId[parentId] != nil {
-                childrenOf[parentId, default: []].append(session)
-            } else {
-                roots.append(session)
-            }
-        }
-        // Sort children by timestamp
-        return roots.map { root in
-            let children = (childrenOf[root.id] ?? []).sorted { $0.timestamp > $1.timestamp }
-            return (root: root, children: children)
-        }
+    private var rows: [SessionExplorerTreeBuilder.Row] {
+        SessionExplorerTreeBuilder.flatten(filteredSessions)
     }
 
     var body: some View {
@@ -73,11 +94,8 @@ struct SessionExplorerView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(trees, id: \.root.id) { tree in
-                        sessionRow(tree.root, indent: 0)
-                        ForEach(tree.children) { child in
-                            sessionRow(child, indent: 1)
-                        }
+                    ForEach(rows) { row in
+                        sessionRow(row.session, indent: row.indent)
                         Divider().background(gw.opacity(0.05))
                     }
                 }

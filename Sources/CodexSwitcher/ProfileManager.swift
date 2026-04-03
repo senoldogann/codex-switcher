@@ -169,7 +169,7 @@ final class ProfileManager: @unchecked Sendable {
         let verifyResult = verifyActiveAccount(expectedAccountId: profile.accountId)
         if case .failed = verifyResult {
             if FileManager.default.fileExists(atPath: Self.authBackupPath.path) {
-                do { try FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: Self.authBackupPath) }
+                do { _ = try FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: Self.authBackupPath) }
                 catch { print("[AuthRollback] rollback failed: \(error)") }
             }
         } else {

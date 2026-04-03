@@ -7,10 +7,8 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 APP_NAME="CodexSwitcher"
-VERSION="1.14.0"
 SIGN_IDENTITY="Developer ID Application: SENOL DOGAN (79DZ4AA4DW)"
-KEY_ID="VMU73YXDVJ"
-KEY_PATH="$HOME/Downloads/AuthKey_VMU73YXDVJ.p8"
+KEY_ID="${APPSTORE_KEY_ID:-VMU73YXDVJ}"
 ISSUER_ID="${1:-}"
 
 if [ -z "$ISSUER_ID" ]; then
@@ -22,10 +20,42 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$ROOT_DIR/Info.plist")"
 BUILD_DIR="$ROOT_DIR/.build/arm64-apple-macosx/release"
 STAGING="$ROOT_DIR/build"
 APP_BUNDLE="$STAGING/$APP_NAME.app"
 RELEASE_DIR="$ROOT_DIR/release"
+
+resolve_key_path() {
+    local configured="${APPSTORE_KEY_PATH:-}"
+    if [ -n "$configured" ] && [ -f "$configured" ]; then
+        printf '%s\n' "$configured"
+        return 0
+    fi
+
+    local candidates=(
+        "$HOME/Desktop/my-docs/AuthKey_${KEY_ID}.p8"
+        "$HOME/Downloads/AuthKey_${KEY_ID}.p8"
+    )
+
+    for path in "${candidates[@]}"; do
+        if [ -f "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+KEY_PATH="$(resolve_key_path || true)"
+if [ -z "$KEY_PATH" ]; then
+    echo "❌ App Store Connect API key bulunamadı."
+    echo "   APPSTORE_KEY_PATH env ver veya dosyayı şu dizinlerden birine koy:"
+    echo "   - $HOME/Desktop/my-docs/AuthKey_${KEY_ID}.p8"
+    echo "   - $HOME/Downloads/AuthKey_${KEY_ID}.p8"
+    exit 1
+fi
 
 # ── 1. Build ─────────────────────────────────────────────────────────────────
 echo "🔨 Building release..."

@@ -714,7 +714,7 @@ final class AppStore: ObservableObject {
         config.profiles.append(profile)
         if shouldActivate {
             config.activeProfileId = profile.id
-            try? profileManager.activate(profile: profile)
+            _ = try? profileManager.activate(profile: profile)
             activeProfile = profile
         }
         profileManager.saveConfig(config)
@@ -736,7 +736,7 @@ final class AppStore: ObservableObject {
         aliasText = ""
         stopAuthWatcher()
         closeAddAccountWindow()
-        if let a = activeProfile { try? profileManager.activate(profile: a) }
+        if let a = activeProfile { _ = try? profileManager.activate(profile: a) }
     }
 
     // MARK: - Statistics Reset
@@ -758,8 +758,8 @@ final class AppStore: ObservableObject {
         let filesToDelete = [
             "event-deltas-v2.json",
             "token-usage.json.mod",
-            "session-meta-v2.json",
-            "session-meta-v2.mod"
+            "session-meta-v3.json",
+            "session-meta-v3.mod"
         ]
         for name in filesToDelete {
             try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(name))
@@ -842,7 +842,7 @@ final class AppStore: ObservableObject {
         if config.activeProfileId == profile.id {
             config.activeProfileId = config.profiles.first?.id
             if let next = config.profiles.first {
-                try? profileManager.activate(profile: next)
+                _ = try? profileManager.activate(profile: next)
                 activeProfile = next
             } else { activeProfile = nil }
         }

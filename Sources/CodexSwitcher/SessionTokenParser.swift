@@ -51,6 +51,17 @@ final class SessionTokenParser: @unchecked Sendable {
         }
     }
 
+    private struct PendingTurn {
+        let promptPreview: String
+        let timestamp: Double
+        var inputTokens: Int
+        var cachedInputTokens: Int
+        var outputTokens: Int
+        var model: String
+
+        var hasTokens: Bool { inputTokens > 0 || outputTokens > 0 }
+    }
+
     init(sessionsDir: URL? = nil, cacheBaseDir: URL? = nil) {
         self.sessionsDir = sessionsDir ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions")
@@ -468,15 +479,17 @@ final class SessionTokenParser: @unchecked Sendable {
         var hourlyMap: [String: Int] = [:]    // "dow-hour" → tokens
 
         for meta in allMeta {
-            let date = Date(timeIntervalSince1970: meta.startTime)
-            guard date > cutoff else { continue }
-            let components = calendar.dateComponents([.weekday, .hour], from: date)
-            // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
-            let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
-            let dow = raw == 0 ? 6 : raw - 1          // 0=Mon…6=Sun
-            let hour = components.hour ?? 0
-            let key = "\(dow)-\(hour)"
-            hourlyMap[key, default: 0] += meta.totalTokens
+            for turn in meta.turns {
+                let date = Date(timeIntervalSince1970: turn.timestamp)
+                guard date > cutoff else { continue }
+                let components = calendar.dateComponents([.weekday, .hour], from: date)
+                // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
+                let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
+                let dow = raw == 0 ? 6 : raw - 1          // 0=Mon…6=Sun
+                let hour = components.hour ?? 0
+                let key = "\(dow)-\(hour)"
+                hourlyMap[key, default: 0] += turn.tokens
+            }
         }
 
         var hourlyActivity: [HourlyActivity] = []
@@ -579,9 +592,26 @@ final class SessionTokenParser: @unchecked Sendable {
         var prevCached = 0
         var prevOutput = 0
         var turns: [SessionFileMeta.CachedTurn] = []
+        var pendingTurn: PendingTurn?
         var sessionMetaParsed = false
 
         func toInt(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? (v as? Int) ?? 0 }
+        func flushPendingTurn() {
+            guard let turn = pendingTurn, turn.hasTokens else {
+                pendingTurn = nil
+                return
+            }
+
+            turns.append(SessionFileMeta.CachedTurn(
+                promptPreview: turn.promptPreview,
+                inputTokens: turn.inputTokens,
+                cachedInputTokens: min(turn.cachedInputTokens, turn.inputTokens),
+                outputTokens: turn.outputTokens,
+                timestamp: turn.timestamp,
+                model: turn.model
+            ))
+            pendingTurn = nil
+        }
 
         for line in content.components(separatedBy: "\n") {
             let t = line.trimmingCharacters(in: .whitespaces)
@@ -638,6 +668,7 @@ final class SessionTokenParser: @unchecked Sendable {
 
             // ── task_started: new turn ──────────────────────────────────
             if payloadType == "task_started" {
+                flushPendingTurn()
                 currentTurnPrompt = ""
                 currentTurnTs = ts
                 continue
@@ -645,6 +676,7 @@ final class SessionTokenParser: @unchecked Sendable {
 
             // ── user_message: capture prompt ────────────────────────────
             if payloadType == "user_message" {
+                flushPendingTurn()
                 if let msg = payload["message"] as? String {
                     let trimmed = msg
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -687,17 +719,28 @@ final class SessionTokenParser: @unchecked Sendable {
                 }
 
                 if dInput + dOutput > 0, !currentTurnPrompt.isEmpty {
-                    turns.append(SessionFileMeta.CachedTurn(
-                        promptPreview: currentTurnPrompt,
-                        inputTokens: dInput,
-                        cachedInputTokens: min(dCached, dInput),
-                        outputTokens: dOutput,
-                        timestamp: ts > 0 ? ts : currentTurnTs,
-                        model: currentTurnModel))
-                    currentTurnPrompt = ""
+                    if pendingTurn == nil {
+                        pendingTurn = PendingTurn(
+                            promptPreview: currentTurnPrompt,
+                            timestamp: currentTurnTs > 0 ? currentTurnTs : ts,
+                            inputTokens: 0,
+                            cachedInputTokens: 0,
+                            outputTokens: 0,
+                            model: currentTurnModel
+                        )
+                    }
+                    if var turn = pendingTurn {
+                        turn.inputTokens += dInput
+                        turn.cachedInputTokens += dCached
+                        turn.outputTokens += dOutput
+                        turn.model = currentTurnModel
+                        pendingTurn = turn
+                    }
                 }
             }
         }
+
+        flushPendingTurn()
 
         guard !sessionId.isEmpty || startTime > 0 else { return nil }
         return SessionFileMeta(

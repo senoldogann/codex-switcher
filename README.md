@@ -121,6 +121,12 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.0.1
+- **Version sync fix** — Bundle version, release build script, and GitHub update detection now stay aligned
+- **Insights accuracy fix** — Multi-event token streams are merged into a single turn instead of undercounting projects and Top $
+- **Heatmap accuracy fix** — Activity buckets now use actual turn timestamps, not only session start time
+- **Session tree fix** — Nested sub-agent sessions render recursively in the Sessions view
+
 ### v2.0.0
 - **Codex-only focus** — Removed Claude Code support; streamlined for OpenAI Codex account management
 - **Simplified architecture** — Removed multi-provider abstraction; cleaner codebase, faster builds

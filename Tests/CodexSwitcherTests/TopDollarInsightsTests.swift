@@ -184,6 +184,96 @@ struct TopDollarInsightsTests {
         let turn = try #require(insights.expensiveTurns.first)
         #expect(turn.model == "gpt-5.4-mini")
     }
+
+    @Test
+    func insightsAggregateMultipleTokenEventsIntoSingleTurn() throws {
+        let lines = [
+            """
+            {"timestamp":"2026-04-03T14:00:00Z","type":"session_meta","payload":{"id":"session-stream","cwd":"/tmp/demo"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T14:00:01Z","type":"event_msg","payload":{"type":"task_started"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T14:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"streamed turn"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T14:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}
+            """,
+            """
+            {"timestamp":"2026-04-03T14:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":40}}}}
+            """
+        ]
+
+        let fixture = try TopDollarFixture.make(lines: lines)
+        defer { fixture.cleanup() }
+
+        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let insights = parser.calculateInsights()
+
+        let turn = try #require(insights.expensiveTurns.first)
+        #expect(insights.expensiveTurns.count == 1)
+        #expect(turn.promptPreview == "streamed turn")
+        #expect(turn.inputTokens == 180)
+        #expect(turn.outputTokens == 40)
+
+        let project = try #require(insights.projects.first)
+        #expect(project.tokens == 220)
+    }
+
+    @Test
+    func insightsHeatmapUsesTurnTimestampsInsteadOfSessionStart() throws {
+        let lines = [
+            """
+            {"timestamp":"2026-04-03T01:00:00Z","type":"session_meta","payload":{"id":"session-heatmap","cwd":"/tmp/demo"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T01:00:01Z","type":"event_msg","payload":{"type":"task_started"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T01:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"early turn"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T01:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":20}}}}
+            """,
+            """
+            {"timestamp":"2026-04-03T18:00:01Z","type":"event_msg","payload":{"type":"task_started"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T18:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"late turn"}}
+            """,
+            """
+            {"timestamp":"2026-04-03T18:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"output_tokens":10}}}}
+            """
+        ]
+
+        let fixture = try TopDollarFixture.make(lines: lines)
+        defer { fixture.cleanup() }
+
+        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let insights = parser.calculateInsights()
+
+        let calendar = Calendar.current
+        let formatter = ISO8601DateFormatter()
+
+        func bucket(for timestamp: String) throws -> (dayOfWeek: Int, hour: Int) {
+            let date = try #require(formatter.date(from: timestamp))
+            let weekday = calendar.component(.weekday, from: date)
+            let rawDay = weekday - 1
+            let dayOfWeek = rawDay == 0 ? 6 : rawDay - 1
+            let hour = calendar.component(.hour, from: date)
+            return (dayOfWeek, hour)
+        }
+
+        let earlyBucket = try bucket(for: "2026-04-03T01:00:03Z")
+        let lateBucket = try bucket(for: "2026-04-03T18:00:03Z")
+
+        let early = insights.hourlyActivity.first { $0.dayOfWeek == earlyBucket.dayOfWeek && $0.hour == earlyBucket.hour }
+        let late = insights.hourlyActivity.first { $0.dayOfWeek == lateBucket.dayOfWeek && $0.hour == lateBucket.hour }
+
+        #expect(early?.tokens == 120)
+        #expect(late?.tokens == 60)
+    }
 }
 
 private struct TopDollarFixture {
