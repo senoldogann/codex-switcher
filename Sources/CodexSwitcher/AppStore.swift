@@ -687,27 +687,25 @@ final class AppStore: ObservableObject {
     }
 
     private func openTerminalWithClaudeLogin() {
-        // claude auth login is interactive — must run inside a visible Terminal window
-        let claudePath = (try? Process.run(
-            URL(fileURLWithPath: "/usr/bin/which"),
-            arguments: ["claude"]
-        ).standardOutput.map { _ in "" }) ?? ""
-        let cmd = "'\(findCLIPath("claude"))' auth login"
+        // claude auth login is interactive — must run inside a visible Terminal window.
+        // Use the shell's login environment so user PATH (~/.local/bin, /opt/homebrew/bin, etc.) is resolved.
         let script = """
         tell application "Terminal"
             activate
-            do script "\(cmd)"
+            do script "claude auth login"
         end tell
         """
         var err: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&err)
-        _ = claudePath  // suppress warning
     }
 
+    /// Finds a CLI binary using the user's login shell PATH.
+    /// Falls back through common install locations if the shell lookup fails.
     private func findCLIPath(_ name: String) -> String {
+        // Use zsh login shell so ~/.zprofile / ~/.zshrc paths (Homebrew, npm, etc.) are loaded
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        task.arguments = [name]
+        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        task.arguments = ["-l", "-c", "which \(name)"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = nil
@@ -715,7 +713,18 @@ final class AppStore: ObservableObject {
         task.waitUntilExit()
         let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return raw.isEmpty ? "/usr/local/bin/\(name)" : raw
+        if !raw.isEmpty { return raw }
+
+        // Common install locations as fallback
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "\(home)/.local/bin/\(name)",
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "\(home)/.npm-global/bin/\(name)"
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) }
+            ?? "/usr/local/bin/\(name)"
     }
 
     private func startClaudeKeychainPoller(previousData: Data?) {
@@ -952,11 +961,11 @@ final class AppStore: ObservableObject {
     // MARK: - Helpers
 
     private func openTerminalWithCodexLogin() {
-        // codex login'i arka planda calistir — Terminal acilmaz
-        // codex login kendi browser'ini acar ve auth.json'u yazar
+        // codex login opens a browser and writes auth.json — no terminal needed
+        let codexPath = findCLIPath("codex")
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["codex", "login"]
+        task.executableURL = URL(fileURLWithPath: codexPath)
+        task.arguments = ["login"]
         task.standardInput = nil
         task.standardOutput = nil
         task.standardError = nil
