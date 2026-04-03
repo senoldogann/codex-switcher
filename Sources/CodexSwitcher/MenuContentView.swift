@@ -20,14 +20,20 @@ struct MenuContentView: View {
     private var gw: Color { scheme == .dark ? .white : .black }
 
     var body: some View {
-        VStack(spacing: 0) {
-            navHeader
-            switch screen {
-            case .main:        mainContent
-            case .history:     historyContent
-            case .addAccount:  addAccountContent
+        HStack(spacing: 0) {
+            sideRail
+            Divider().background(gw.opacity(0.06))
+
+            VStack(spacing: 0) {
+                navHeader
+                switch screen {
+                case .main:        mainContent
+                case .history:     historyContent
+                case .addAccount:  addAccountContent
+                }
+                Divider().background(gw.opacity(0.04))
+                updateStatusStrip
             }
-            if screen == .main { footerBar }
         }
         .background(.ultraThinMaterial)
         .background(scheme == .dark ? Color.black.opacity(0.35) : Color.white.opacity(0.15))
@@ -48,19 +54,9 @@ struct MenuContentView: View {
         Group {
             if screen != .main {
                 HStack {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { screen = .main }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(Str.back)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundStyle(gw.opacity(0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .pointerCursor()
+                    Text(screen == .history ? Str.history : Str.addAccount)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.72))
                     Spacer()
                 }
                 .padding(.horizontal, 14)
@@ -263,6 +259,7 @@ struct MenuContentView: View {
     private var addAccountContent: some View {
         AddAccountInlineView().environmentObject(store)
             .frame(minHeight: 300)
+            .frame(maxHeight: 420)
     }
 
     // MARK: - Empty
@@ -626,70 +623,9 @@ struct MenuContentView: View {
         return nil
     }
 
-    // MARK: - Update Button
+    // MARK: - Sidebar
 
-    private var updateButton: some View {
-        Button {
-            if store.availableUpdate != nil {
-                store.openReleasePage()
-            } else {
-                store.checkForUpdatesManually()
-            }
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 2) {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 12, weight: .medium))
-                    Text(L("Güncelle", "Update"))
-                        .font(.system(size: 9, weight: .medium))
-                }
-                .frame(maxWidth: .infinity)
-                .foregroundStyle(store.availableUpdate != nil ? Color.orange.opacity(0.85) : gw.opacity(0.52))
-                .contentShape(Rectangle())
-
-                if store.availableUpdate != nil {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 6, height: 6)
-                        .offset(x: -4, y: 2)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-    }
-
-    // MARK: - Footer
-
-    private var footerBar: some View {
-        VStack(spacing: 0) {
-            Divider().background(gw.opacity(0.06))
-            HStack(spacing: 0) {
-                footerBtn("plus", Str.addAccount) {
-                    withAnimation(.easeInOut(duration: 0.15)) { screen = .addAccount }
-                }
-                    .disabled(store.isAddingAccount)
-                thinDivider
-                footerBtn("arrow.triangle.2.circlepath", Str.switchNow) { store.switchToNext() }
-                    .disabled(store.profiles.count < 2)
-                thinDivider
-                footerBtn("clock.arrow.trianglehead.counterclockwise.rotate.90", Str.history) {
-                    withAnimation(.easeInOut(duration: 0.15)) { screen = .history }
-                }
-                thinDivider
-                updateButton
-                thinDivider
-                footerBtn("power", Str.quit) { NSApplication.shared.terminate(nil) }
-            }
-            .frame(height: 44)
-
-            settingsBar
-        }
-    }
-
-    // MARK: - Settings Bar
-
-    private var settingsBar: some View {
+    private var sideRail: some View {
         let langLabel: String = {
             switch appLanguage {
             case "tr": return "TR"
@@ -699,41 +635,91 @@ struct MenuContentView: View {
         }()
 
         return VStack(spacing: 0) {
-            Divider().background(gw.opacity(0.04))
-            HStack(spacing: 0) {
-                // Language toggle: system → tr → en → system
-                settingsBtn("globe", langLabel) {
+            VStack(spacing: 0) {
+                railButton(
+                    "rectangle.stack.person.crop",
+                    L("Hesaplar", "Accounts"),
+                    selected: screen == .main
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .main }
+                }
+
+                railDivider
+
+                railButton(
+                    "plus",
+                    Str.addAccount,
+                    selected: screen == .addAccount
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .addAccount }
+                }
+                .disabled(store.isAddingAccount)
+
+                railDivider
+
+                railButton(
+                    "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    Str.history,
+                    selected: screen == .history
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .history }
+                }
+
+                railDivider
+
+                railButton("arrow.triangle.2.circlepath", Str.switchNow) {
+                    store.switchToNext()
+                }
+                .disabled(store.profiles.count < 2)
+
+                railDivider
+
+                updateRailButton
+            }
+            .padding(.top, 10)
+
+            Spacer(minLength: 10)
+
+            VStack(spacing: 0) {
+                railButton("globe", langLabel) {
                     if appLanguage == "system"   { appLanguage = "tr" }
                     else if appLanguage == "tr"  { appLanguage = "en" }
                     else                         { appLanguage = "system" }
                 }
-                thinDivider
-                // Email blur
-                settingsBtn(emailsBlurred ? "eye.slash" : "eye",
-                            emailsBlurred ? Str.showEmail : Str.hideEmail) {
+
+                railDivider
+
+                railButton("eye", emailsBlurred ? Str.showEmail : Str.hideEmail) {
                     withAnimation(.easeInOut(duration: 0.2)) { emailsBlurred.toggle() }
                 }
-                thinDivider
-                // Dark / Light
-                settingsBtn(isDarkMode ? "moon.fill" : "sun.max",
-                            isDarkMode ? Str.dark : Str.light) {
+
+                railDivider
+
+                railButton(isDarkMode ? "moon.fill" : "sun.max", isDarkMode ? Str.dark : Str.light) {
                     isDarkMode.toggle()
                 }
-                thinDivider
-                // Budget limit button
-                settingsBtn("dollarsign.circle", budgetLabel) {
+
+                railDivider
+
+                railButton("dollarsign.circle", budgetLabel) {
                     showBudgetAlert()
                 }
-                thinDivider
-                // Reset token statistics
-                settingsBtn("arrow.counterclockwise", L("Sıfırla", "Reset")) {
+
+                railDivider
+
+                railButton("arrow.counterclockwise", L("Sıfırla", "Reset")) {
                     store.resetStatistics()
                 }
-            }
-            .frame(height: 36)
 
-            updateStatusStrip
+                railDivider
+
+                railButton("power", Str.quit) {
+                    NSApplication.shared.terminate(nil)
+                }
+            }
+            .padding(.bottom, 10)
         }
+        .frame(width: 84)
     }
 
     private var updateStatusStrip: some View {
@@ -798,36 +784,73 @@ struct MenuContentView: View {
 
     // MARK: - Shared Helpers
 
-    private var thinDivider: some View {
-        Divider().frame(height: 16).background(gw.opacity(0.07))
+    private var railDivider: some View {
+        Divider()
+            .background(gw.opacity(0.05))
+            .padding(.horizontal, 14)
     }
 
-    private func footerBtn(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: icon).font(.system(size: 12, weight: .medium))
-                Text(label).font(.system(size: 9, weight: .medium))
+    private var updateRailButton: some View {
+        Button {
+            if store.availableUpdate != nil {
+                store.openReleasePage()
+            } else {
+                store.checkForUpdatesManually()
             }
-            .frame(maxWidth: .infinity)
-            .foregroundStyle(gw.opacity(0.52))
-            .contentShape(Rectangle())
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                railButtonBody(
+                    icon: "arrow.down.circle",
+                    label: L("Güncelle", "Update"),
+                    selected: false,
+                    foreground: store.availableUpdate != nil ? Color.orange.opacity(0.85) : gw.opacity(0.46)
+                )
+
+                if store.availableUpdate != nil {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                        .offset(x: -20, y: 10)
+                }
+            }
         }
         .buttonStyle(.plain)
         .pointerCursor()
     }
 
-    private func settingsBtn(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
+    private func railButton(
+        _ icon: String,
+        _ label: String,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: icon).font(.system(size: 11, weight: .medium))
-                Text(label).font(.system(size: 9, weight: .medium))
-            }
-            .frame(maxWidth: .infinity)
-            .foregroundStyle(gw.opacity(0.38))
-            .contentShape(Rectangle())
+            railButtonBody(icon: icon, label: label, selected: selected, foreground: selected ? gw.opacity(0.76) : gw.opacity(0.42))
         }
         .buttonStyle(.plain)
         .pointerCursor()
+    }
+
+    private func railButtonBody(icon: String, label: String, selected: Bool, foreground: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: selected ? .semibold : .medium))
+
+            Text(label)
+                .font(.system(size: 8, weight: selected ? .semibold : .medium))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .foregroundStyle(foreground)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(selected ? gw.opacity(0.06) : .clear)
+        )
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
     }
 
     private var updateStateLabel: String {

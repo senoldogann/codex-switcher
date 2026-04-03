@@ -147,7 +147,8 @@ struct UsageChartView: View {
                         Text("tok")
                             .font(.system(size: 9))
                             .foregroundStyle(gw.opacity(0.25))
-                        if let cost = store.costs[profile.id], cost > 0 {
+                        if store.analyticsTimeRange == .sevenDays,
+                           let cost = store.costs[profile.id], cost > 0 {
                             Text("·")
                                 .foregroundStyle(gw.opacity(0.2))
                             Text(CostCalculator.format(cost))

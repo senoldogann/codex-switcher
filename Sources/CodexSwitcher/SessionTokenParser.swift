@@ -51,6 +51,24 @@ final class SessionTokenParser: @unchecked Sendable {
         }
     }
 
+    private struct FilteredSessionMeta {
+        let sessionId: String
+        let cwd: String
+        let firstPrompt: String
+        let depth: Int
+        let agentRole: String
+        let parentId: String?
+        let turns: [SessionFileMeta.CachedTurn]
+
+        var totalTokens: Int {
+            turns.reduce(0) { $0 + $1.inputTokens + $1.outputTokens }
+        }
+
+        var lastActivityTimestamp: Double {
+            turns.map(\.timestamp).max() ?? 0
+        }
+    }
+
     private struct PendingTurn {
         let promptPreview: String
         let timestamp: Double
@@ -405,9 +423,21 @@ final class SessionTokenParser: @unchecked Sendable {
 
         let calendar = Calendar.current
         let cutoff = cutoffDate(for: range)
-        let allMeta = metaCache.values.filter { meta in
-            guard let cutoff else { return true }
-            return Date(timeIntervalSince1970: meta.startTime) > cutoff
+        let allMeta: [FilteredSessionMeta] = metaCache.values.compactMap { meta in
+            let filteredTurns = meta.turns.filter { turn in
+                guard let cutoff else { return true }
+                return Date(timeIntervalSince1970: turn.timestamp) > cutoff
+            }
+            guard !filteredTurns.isEmpty else { return nil }
+            return FilteredSessionMeta(
+                sessionId: meta.sessionId,
+                cwd: meta.cwd,
+                firstPrompt: meta.firstPrompt,
+                depth: meta.depth,
+                agentRole: meta.agentRole,
+                parentId: meta.parentId,
+                turns: filteredTurns
+            )
         }
 
         // ── 1. Projects ──────────────────────────────────────────────────
@@ -423,7 +453,7 @@ final class SessionTokenParser: @unchecked Sendable {
             let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
             let name = path == "unknown" ? "Unknown"
                      : (URL(fileURLWithPath: path).lastPathComponent)
-            let date = Date(timeIntervalSince1970: meta.startTime)
+            let date = Date(timeIntervalSince1970: meta.lastActivityTimestamp)
 
             projectName[path] = name
             projectTokens[path, default: 0]   += meta.totalTokens
@@ -460,7 +490,7 @@ final class SessionTokenParser: @unchecked Sendable {
             .sorted { $0.tokens > $1.tokens }
 
         // ── 2. Sessions (sorted newest first) ───────────────────────────
-        let sessions: [SessionSummary] = metaCache.values
+        let sessions: [SessionSummary] = allMeta
             .map { meta -> SessionSummary in
                 let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
                 let name = path == "unknown" ? "Unknown"
@@ -471,7 +501,7 @@ final class SessionTokenParser: @unchecked Sendable {
                     projectPath: path,
                     firstPrompt: meta.firstPrompt,
                     tokens: meta.totalTokens,
-                    timestamp: Date(timeIntervalSince1970: meta.startTime),
+                    timestamp: Date(timeIntervalSince1970: meta.lastActivityTimestamp),
                     depth: meta.depth,
                     agentRole: meta.agentRole,
                     parentId: meta.parentId)
@@ -484,7 +514,6 @@ final class SessionTokenParser: @unchecked Sendable {
         for meta in allMeta {
             for turn in meta.turns {
                 let date = Date(timeIntervalSince1970: turn.timestamp)
-                if let cutoff, date <= cutoff { continue }
                 let components = calendar.dateComponents([.weekday, .hour], from: date)
                 // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
                 let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
@@ -510,8 +539,6 @@ final class SessionTokenParser: @unchecked Sendable {
             let name = path == "unknown" ? "Unknown"
                      : URL(fileURLWithPath: path).lastPathComponent
             return meta.turns.compactMap { turn in
-                let turnDate = Date(timeIntervalSince1970: turn.timestamp)
-                if let cutoff, turnDate <= cutoff { return nil }
                 let turnUsage = AccountTokenUsage(
                     inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
                     outputTokens: turn.outputTokens, reasoningTokens: 0,

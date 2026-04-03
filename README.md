@@ -137,6 +137,11 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.1.1
+- **Left rail navigation** — Reworked the menu actions into a compact vertical sidebar while preserving the existing glass styling
+- **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
+- **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
+
 ### v2.1.0
 - **Update status visibility** — Settings area now shows current version, latest version, last checked time, and update state
 - **Analytics range filter** — Insights and chart views now support `7d`, `30d`, and `all-time`

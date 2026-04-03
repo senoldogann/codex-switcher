@@ -99,4 +99,38 @@ struct AnalyticsRangeTests {
         #expect(sevenDays[profiles[0].id]?.allSatisfy { $0.tokens == 0 } == true)
         #expect(thirtyDays[profiles[0].id]?.contains(where: { $0.tokens == 110 }) == true)
     }
+
+    @Test
+    func calculateInsightsIncludesRecentTurnsFromOlderSessions() throws {
+        let now = Date()
+        let calendar = Calendar.current
+        let sessionStart = calendar.date(byAdding: .day, value: -40, to: now) ?? now
+        let recentTurn = calendar.date(byAdding: .day, value: -2, to: now) ?? now
+        let formatter = ISO8601DateFormatter()
+
+        let lines = [
+            """
+            {"timestamp":"\(formatter.string(from: sessionStart))","type":"session_meta","payload":{"id":"long-session","cwd":"/tmp/long-lived"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: recentTurn))","type":"event_msg","payload":{"type":"task_started"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: recentTurn.addingTimeInterval(1)))","type":"event_msg","payload":{"type":"user_message","message":"recent work in old session"}}
+            """,
+            """
+            {"timestamp":"\(formatter.string(from: recentTurn.addingTimeInterval(2)))","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":120,"output_tokens":30}}}}
+            """
+        ]
+
+        let fixture = try SessionFixture.make(lines: lines)
+        defer { fixture.cleanup() }
+
+        let parser = fixture.parser()
+        let insights = parser.calculateInsights(range: .sevenDays)
+
+        #expect(insights.projects.map(\.name) == ["long-lived"])
+        #expect(insights.expensiveTurns.count == 1)
+        #expect(insights.sessions.first?.projectName == "long-lived")
+    }
 }
