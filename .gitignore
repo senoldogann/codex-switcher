@@ -20,3 +20,4 @@ CodexSwitcher.app/
 # Swift Package Manager
 Package.resolved
 Package.repos
+.swiftpm/

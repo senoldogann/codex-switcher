@@ -179,12 +179,13 @@ final class AppStore: ObservableObject {
             }
         }
 
-        // Consecutive failure gating
+        // Consecutive failure gating — back off for up to 3 skipped polls, then retry
         if successCount == 0 && !credPairs.isEmpty {
             consecutiveFetchFailures += 1
-            if consecutiveFetchFailures >= 3 {
-                // Back off: skip next few polls
+            if consecutiveFetchFailures < 6 && consecutiveFetchFailures >= 3 {
                 return
+            } else if consecutiveFetchFailures >= 6 {
+                consecutiveFetchFailures = 0
             }
         } else {
             consecutiveFetchFailures = 0
@@ -605,7 +606,7 @@ final class AppStore: ObservableObject {
         stopAuthWatcher()
         closeAddAccountWindow()
         notifyProfileChanged()
-        sendNotification(title: "Hesap eklendi", body: profile.displayName)
+        sendNotification(title: L("Hesap eklendi", "Account added"), body: profile.displayName)
         Task { await fetchAllRateLimits() }
     }
 
@@ -733,7 +734,7 @@ final class AppStore: ObservableObject {
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tokens = dict["tokens"] as? [String: Any],
                   let access = tokens["access_token"] as? String else { return }
-            pendingProfileEmail = profileManager.extractEmail(from: access) ?? "bilinmeyen"
+            pendingProfileEmail = profileManager.extractEmail(from: access) ?? "unknown"
             addingStep = .confirmProfile
         } else {
             // External modification detected — verify

@@ -3,7 +3,8 @@ import PackageDescription
 
 let package = Package(
     name: "CodexSwitcher",
-    platforms: [.macOS(.v26)],
+    defaultLocalization: "en",
+    platforms: [.macOS(.v15)],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],
@@ -15,7 +16,7 @@ let package = Package(
             ],
             path: "Sources/CodexSwitcher",
             resources: [
-                .copy("Resources/codex.icns")
+                .process("Resources")
             ]
         )
     ]

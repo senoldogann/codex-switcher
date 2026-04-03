@@ -84,7 +84,7 @@ struct AddAccountInlineView: View {
                 Circle()
                     .stroke(gw.opacity(0.06), lineWidth: 2)
                     .frame(width: 52 + pulsePhase * 20, height: 52 + pulsePhase * 20)
-                    .opacity(1 - pulsePhase * 0.8)
+                    .opacity(1 - Double(pulsePhase) * 0.8)
 
                 // Inner glass circle
                 Circle()
@@ -224,7 +224,11 @@ struct AddAccountInlineView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(gw.opacity(0.9))
 
-            glassButton(Str.close, icon: "xmark") { store.closeAddAccountWindow() }
+            glassButton(Str.close, icon: "xmark") {
+                store.closeAddAccountWindow()
+                store.addingStep = .idle
+                store.isAddingAccount = false
+            }
         }
     }
 

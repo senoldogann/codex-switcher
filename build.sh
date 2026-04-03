@@ -17,6 +17,13 @@ cp "${BUILD_DIR}/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
 cp "Info.plist" "${APP_BUNDLE}/Contents/"
 cp "Sources/CodexSwitcher/Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/"
 
+# Bundle Sparkle framework
+mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
+cp -R "${BUILD_DIR}/Sparkle.framework" "${APP_BUNDLE}/Contents/Frameworks/"
+
+# Fix rpath so the binary finds Sparkle in Contents/Frameworks
+install_name_tool -add_rpath "@executable_path/../Frameworks" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}" 2>/dev/null || true
+
 # Ad-hoc sign — Gatekeeper "damaged" hatasını önler
 codesign --force --deep --sign - "${APP_BUNDLE}"
 

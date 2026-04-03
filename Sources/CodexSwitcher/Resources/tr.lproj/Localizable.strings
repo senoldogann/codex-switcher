@@ -1,0 +1,70 @@
+/* Str enum */
+"Add Account" = "Hesap Ekle";
+"Switch Now" = "Şimdi Geç";
+"Quit" = "Çıkış";
+"Weekly" = "Haftalık";
+"5 Hour" = "5 Saat";
+"Active Account" = "Aktif Hesap";
+"No accounts added" = "Hesap eklenmedi";
+"Rename" = "Yeniden Adlandır";
+"Delete" = "Sil";
+"Cancel" = "İptal";
+"Save" = "Kaydet";
+"Close" = "Kapat";
+"Start" = "Başlat";
+"Add New Account" = "Yeni Hesap Ekle";
+"Waiting for Login" = "Login Bekleniyor";
+"Account Detected!" = "Hesap Algılandı!";
+"Account Added!" = "Hesap Eklendi!";
+"Alias (optional)" = "Takma ad (opsiyonel)";
+"e.g. Work account" = "örn: İş hesabım";
+"Terminal will run `codex login`.\nSign in with your new account in the browser." = "Terminal'de `codex login` çalıştırılacak.\nBrowser'da yeni hesabınla giriş yap.";
+"Sign in with your account in the browser.\nWill continue automatically when done." = "Browser'da hesabınla giriş yap.\nTamamlanınca otomatik devam eder.";
+"Rename Account" = "Hesap Adını Değiştir";
+"All accounts exhausted!" = "Tüm hesaplar doldu!";
+"Switch anyway" = "Yine de geç";
+"last" = "son";
+"usage unknown" = "kullanım bilinmiyor";
+"Resets" = "Sıfırlanma";
+"History" = "Geçmiş";
+"No switches yet" = "Henüz geçiş yok";
+"Dark" = "Koyu";
+"Light" = "Açık";
+"Hide" = "Gizle";
+"Show" = "Göster";
+"Auto" = "Oto";
+"Back" = "Geri";
+"Limit reset" = "Limit sıfırlandı";
+"is ready to use again" = "kullanıma hazır";
+
+/* MenuContentView */
+"Manual override" = "Manuel override";
+"Chart" = "Grafik";
+"Re-login" = "Girişi Yenile";
+"Update" = "Güncelle";
+"Reset" = "Sıfırla";
+"No usage data in the last 7 days" = "Son 7 günde kullanım verisi yok";
+"Last 7 days — Token usage" = "Son 7 gün — Token kullanımı";
+
+/* AppStore */
+"Account" = "Hesap";
+"Limit warning" = "Limit uyarısı";
+"Manual switch" = "Manuel geçiş";
+"Will resume when limits reset." = "Limitler sıfırlanınca devam eder.";
+"Manual selection" = "Manuel seçim";
+"Switch failed" = "Geçiş başarısız";
+"Account verification failed. Please try again." = "Hesap doğrulanamadı. Lütfen tekrar deneyin.";
+"Account switched" = "Hesap değiştirildi";
+"Account Switched" = "Hesap değiştirildi";
+"Codex is restarting. New account is now active." = "Codex yeniden başlatılıyor. Yeni hesap aktif.";
+"Limit reached" = "Limit doldu";
+"Account added" = "Hesap eklendi";
+"Re-login successful" = "Giriş yenilendi";
+"Wrong account" = "Hatalı hesap";
+"A different account was detected. Please try again." = "Farklı bir hesaba giriş yapıldı. Tekrar deneyin.";
+"Auth issue" = "Auth sorunu";
+"Auth file corrupted. You may need to re-login to your accounts." = "Auth dosyası bozuldu. Hesapları yeniden giriş yapmanız gerekebilir.";
+
+/* ProfileManager errors */
+"No accounts added yet." = "Henüz hesap eklenmedi.";
+"All accounts have reached their limit!" = "Tüm hesapların limiti doldu!";

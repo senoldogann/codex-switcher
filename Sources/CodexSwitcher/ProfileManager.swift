@@ -155,7 +155,7 @@ final class ProfileManager: @unchecked Sendable {
             return nil
         }
 
-        let email = extractEmail(from: accessToken) ?? "bilinmeyen@hesap.com"
+        let email = extractEmail(from: accessToken) ?? "unknown@account.com"
         let profile = Profile(
             id: UUID(),
             alias: alias,
@@ -270,13 +270,13 @@ enum SwitcherError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAuthFile(let email):
-            return "Auth dosyası bulunamadı: \(email)"
+            return L("Auth dosyası bulunamadı: \(email)", "Auth file not found: \(email)")
         case .noProfilesAvailable:
-            return "Henüz hesap eklenmedi."
+            return L("Henüz hesap eklenmedi.", "No accounts added yet.")
         case .allProfilesExhausted:
-            return "Tüm hesapların limiti doldu!"
+            return L("Tüm hesapların limiti doldu!", "All accounts have reached their limit!")
         case .activationFailed(let email):
-            return "Aktivasyon başarısız: \(email)"
+            return L("Aktivasyon başarısız: \(email)", "Activation failed: \(email)")
         }
     }
 }

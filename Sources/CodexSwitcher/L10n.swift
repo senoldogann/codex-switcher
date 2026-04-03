@@ -1,17 +1,20 @@
 import Foundation
 
-/// Basit TR/EN yerelleştirme.
-/// Önce UserDefaults'taki "appLanguage" key'ine bakar ("tr" / "en" / "system").
-/// "system" veya ayarlanmamışsa sistem dilini kullanır.
+/// TR/EN localisation. English is the base language; Turkish ships as a standard
+/// tr.lproj/Localizable.strings bundle loaded via NSLocalizedString.
+/// UserDefaults key "appLanguage": "en" (default) | "tr" | "system"
 func L(_ tr: String, _ en: String) -> String {
-    let stored = UserDefaults.standard.string(forKey: "appLanguage") ?? "system"
+    let stored = UserDefaults.standard.string(forKey: "appLanguage") ?? "en"
     let code: String
     if stored == "system" {
         code = Locale.current.language.languageCode?.identifier ?? "en"
     } else {
         code = stored
     }
-    return code == "tr" ? tr : en
+    guard code == "tr" else { return en }
+    // Look up Turkish from the bundle; fall back to the hardcoded tr string
+    // for interpolated strings that can't be static .strings keys.
+    return NSLocalizedString(en, tableName: "Localizable", bundle: .module, value: tr, comment: "")
 }
 
 enum Str {

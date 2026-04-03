@@ -32,7 +32,7 @@ struct RateLimitInfo: Sendable {
     var weeklyResetLabel: String {
         guard let date = weeklyResetAt else { return "" }
         let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "tr_TR")
+        fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "d MMM"
         return fmt.string(from: date)
     }
@@ -40,7 +40,7 @@ struct RateLimitInfo: Sendable {
     var fiveHourResetLabel: String {
         guard let date = fiveHourResetAt else { return "" }
         let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "tr_TR")
+        fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "HH:mm"
         return fmt.string(from: date)
     }
