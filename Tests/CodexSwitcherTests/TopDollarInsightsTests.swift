@@ -8,7 +8,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make()
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         #expect(insights.expensiveTurns.count == 2)
@@ -21,7 +21,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make()
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let expected = CostCalculator().cost(
@@ -102,7 +102,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make(lines: lines)
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let turn = try #require(insights.expensiveTurns.first)
@@ -148,7 +148,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make(lines: lines)
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let turn = try #require(insights.expensiveTurns.first)
@@ -178,7 +178,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make(lines: lines)
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let turn = try #require(insights.expensiveTurns.first)
@@ -208,7 +208,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make(lines: lines)
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let turn = try #require(insights.expensiveTurns.first)
@@ -250,7 +250,7 @@ struct TopDollarInsightsTests {
         let fixture = try TopDollarFixture.make(lines: lines)
         defer { fixture.cleanup() }
 
-        let parser = SessionTokenParser(sessionsDir: fixture.sessionsDir, cacheBaseDir: fixture.cacheDir)
+        let parser = fixture.parser()
         let insights = parser.calculateInsights()
 
         let calendar = Calendar.current
@@ -276,11 +276,7 @@ struct TopDollarInsightsTests {
     }
 }
 
-private struct TopDollarFixture {
-    let rootDir: URL
-    let sessionsDir: URL
-    let cacheDir: URL
-
+private extension SessionFixture {
     static func make() throws -> TopDollarFixture {
         try make(lines: [
             """
@@ -309,28 +305,6 @@ private struct TopDollarFixture {
             """
         ])
     }
-
-    static func make(lines: [String]) throws -> TopDollarFixture {
-        let fm = FileManager.default
-        let rootDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let sessionsDir = rootDir.appendingPathComponent("sessions", isDirectory: true)
-        let cacheDir = rootDir.appendingPathComponent("cache", isDirectory: true)
-
-        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
-        try fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-
-        let fixture = TopDollarFixture(rootDir: rootDir, sessionsDir: sessionsDir, cacheDir: cacheDir)
-        try fixture.writeSession(lines: lines)
-        return fixture
-    }
-
-    func cleanup() {
-        try? FileManager.default.removeItem(at: rootDir)
-    }
-
-    private func writeSession(lines: [String]) throws {
-        let content = lines.joined(separator: "\n") + "\n"
-        let sessionURL = sessionsDir.appendingPathComponent("session-1.jsonl")
-        try content.write(to: sessionURL, atomically: true, encoding: .utf8)
-    }
 }
+
+private typealias TopDollarFixture = SessionFixture

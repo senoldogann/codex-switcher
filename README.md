@@ -69,6 +69,22 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 
 To launch at login: **System Settings → General → Login Items** → add `CodexSwitcher`.
 
+## Release Automation
+
+Single command local release flow:
+
+```bash
+./scripts/release.sh 10585e36-d130-478a-b63a-5b871d472338
+```
+
+What it does:
+- runs `swift test`
+- builds the signed and notarized app
+- reads the version from `Info.plist`
+- validates the matching changelog entry in `README.md`
+- creates/pushes the git tag if needed
+- creates or updates the GitHub release and uploads the signed zip
+
 ---
 
 ## How It Works
@@ -120,6 +136,14 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ---
 
 ## Changelog
+
+### v2.1.0
+- **Update status visibility** — Settings area now shows current version, latest version, last checked time, and update state
+- **Analytics range filter** — Insights and chart views now support `7d`, `30d`, and `all-time`
+- **Rate limit health diagnostics** — Stale reason, HTTP failure context, and last successful fetch are now visible per account
+- **Codex login fix** — Add Account / Re-login now capture the auth URL from `codex login` output and open the browser reliably
+- **Fixture-based regression coverage** — Added parser and update-check tests for ranges, login URL extraction, and release state parsing
+- **Release automation** — `./scripts/release.sh <issuer-id>` now runs tests, builds the signed/notarized app, tags, and publishes the GitHub release
 
 ### v2.0.1
 - **Version sync fix** — Bundle version, release build script, and GitHub update detection now stay aligned

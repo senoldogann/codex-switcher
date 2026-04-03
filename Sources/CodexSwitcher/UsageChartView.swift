@@ -37,18 +37,34 @@ struct UsageChartView: View {
         return "\(n)"
     }
 
+    private var rangeTitle: String {
+        switch store.analyticsTimeRange {
+        case .sevenDays: return L("Son 7 gün — Token kullanımı", "Last 7 days — Token usage")
+        case .thirtyDays: return L("Son 30 gün — Token kullanımı", "Last 30 days — Token usage")
+        case .allTime: return L("Tüm zamanlar — Token kullanımı", "All time — Token usage")
+        }
+    }
+
+    private var emptyTitle: String {
+        switch store.analyticsTimeRange {
+        case .sevenDays: return L("Son 7 günde kullanım verisi yok", "No usage data in the last 7 days")
+        case .thirtyDays: return L("Son 30 günde kullanım verisi yok", "No usage data in the last 30 days")
+        case .allTime: return L("Henüz kullanım verisi yok", "No usage data yet")
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         if chartPoints.isEmpty {
-            Text(L("Son 7 günde kullanım verisi yok", "No usage data in the last 7 days"))
+            Text(emptyTitle)
                 .font(.system(size: 12))
                 .foregroundStyle(gw.opacity(0.35))
                 .frame(maxWidth: .infinity)
                 .padding(40)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                Text(L("Son 7 gün — Token kullanımı", "Last 7 days — Token usage"))
+                Text(rangeTitle)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(gw.opacity(0.38))
                     .padding(.horizontal, 14)

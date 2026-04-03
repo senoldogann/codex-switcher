@@ -144,6 +144,98 @@ struct DailyUsage: Identifiable {
     var id: TimeInterval { dayStart.timeIntervalSince1970 }
 }
 
+enum AnalyticsTimeRange: String, Codable, CaseIterable {
+    case sevenDays
+    case thirtyDays
+    case allTime
+
+    var title: String {
+        switch self {
+        case .sevenDays: return "7d"
+        case .thirtyDays: return "30d"
+        case .allTime: return "All"
+        }
+    }
+
+    var dayWindow: Int? {
+        switch self {
+        case .sevenDays: return 7
+        case .thirtyDays: return 30
+        case .allTime: return nil
+        }
+    }
+}
+
+enum UpdateCheckState: Equatable {
+    case idle
+    case checking
+    case upToDate
+    case updateAvailable
+    case failed
+}
+
+struct UpdateReleaseInfo: Equatable, Sendable {
+    let version: String
+    let releaseURL: URL
+    let tagName: String
+}
+
+struct UpdateStatusSnapshot: Equatable, Sendable {
+    let currentVersion: String
+    let latestVersion: String?
+    let release: UpdateReleaseInfo?
+    let lastCheckedAt: Date?
+    let state: UpdateCheckState
+    let errorSummary: String?
+
+    static func idle(currentVersion: String) -> UpdateStatusSnapshot {
+        UpdateStatusSnapshot(
+            currentVersion: currentVersion,
+            latestVersion: nil,
+            release: nil,
+            lastCheckedAt: nil,
+            state: .idle,
+            errorSummary: nil
+        )
+    }
+
+    static func checking(currentVersion: String, latestVersion: String?, release: UpdateReleaseInfo?, lastCheckedAt: Date?) -> UpdateStatusSnapshot {
+        UpdateStatusSnapshot(
+            currentVersion: currentVersion,
+            latestVersion: latestVersion,
+            release: release,
+            lastCheckedAt: lastCheckedAt,
+            state: .checking,
+            errorSummary: nil
+        )
+    }
+}
+
+enum RateLimitStaleReason: String, Codable, Sendable {
+    case unauthorized
+    case forbidden
+    case invalidAuth
+    case unknown
+
+    var summary: String {
+        switch self {
+        case .unauthorized: return "401 unauthorized"
+        case .forbidden: return "403 forbidden"
+        case .invalidAuth: return "invalid auth"
+        case .unknown: return "stale auth"
+        }
+    }
+}
+
+struct RateLimitHealthStatus: Sendable {
+    var lastCheckedAt: Date?
+    var lastSuccessfulFetchAt: Date?
+    var lastFailedFetchAt: Date?
+    var lastHTTPStatusCode: Int?
+    var staleReason: RateLimitStaleReason?
+    var failureSummary: String?
+}
+
 // MARK: - Codex Insights
 
 struct ProjectUsage: Identifiable {

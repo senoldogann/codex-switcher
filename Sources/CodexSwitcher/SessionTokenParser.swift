@@ -106,7 +106,7 @@ final class SessionTokenParser: @unchecked Sendable {
 
             let prev = prevModTimes[url.path]
             if prev == nil || prev != modDate {
-                let deltas = parseEventDeltas(at: url, windowStart: windowStart)
+                let deltas = parseEventDeltas(at: url)
                 if deltas.isEmpty {
                     deltaCache.removeValue(forKey: url.path)
                 } else {
@@ -215,11 +215,8 @@ final class SessionTokenParser: @unchecked Sendable {
 
     // MARK: - Session Parsing (CodexBar yaklaşımı: delta hesaplama)
 
-    /// windowStart: all events are parsed (to build correct cumulative baseline),
-    /// but only events AFTER windowStart are emitted as deltas.
-    /// This prevents sessions that started before the window from counting all
-    /// historical tokens as a single large delta on the first in-window event.
-    private func parseEventDeltas(at url: URL, windowStart: Date) -> [SessionEventDelta] {
+    /// Parse all token deltas so higher-level callers can apply their own time windows.
+    private func parseEventDeltas(at url: URL) -> [SessionEventDelta] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
 
         var deltas: [SessionEventDelta] = []
@@ -284,9 +281,6 @@ final class SessionTokenParser: @unchecked Sendable {
                 prevCached = curCached
                 prevOutput = curOutput
 
-                // Pencere dışındaki event'leri baseline için kullan ama kaydetme
-                guard ts > windowStart else { continue }
-
                 if dInput > 0 || dOutput > 0 {
                     deltas.append(SessionEventDelta(
                         timestamp: ts,
@@ -298,8 +292,6 @@ final class SessionTokenParser: @unchecked Sendable {
                 }
             } else if let last = info["last_token_usage"] as? [String: Any] {
                 // Fallback: event başına değerler (delta zaten verilmiş)
-                guard ts > windowStart else { continue }
-
                 let dInput  = max(0, toInt(last["input_tokens"]))
                 let dCached = max(0, toInt(last["cached_input_tokens"] ?? last["cache_read_input_tokens"]))
                 let dOutput = max(0, toInt(last["output_tokens"]))
@@ -323,8 +315,8 @@ final class SessionTokenParser: @unchecked Sendable {
 
     /// Groups cached deltas into per-day, per-account token totals.
     /// Reuses the delta cache written by calculate() so no extra file parsing.
-    func calculateDaily(profiles: [Profile], history: [SwitchEvent], activeProfileId: UUID?) -> [UUID: [DailyUsage]] {
-        let windowStart = Date().addingTimeInterval(-7 * 24 * 3600)
+    func calculateDaily(profiles: [Profile], history: [SwitchEvent], activeProfileId: UUID?, range: AnalyticsTimeRange = .sevenDays) -> [UUID: [DailyUsage]] {
+        let windowStart = cutoffDate(for: range)
         let deltaCache = loadDeltaCache()
         guard !deltaCache.isEmpty else { return [:] }
 
@@ -334,7 +326,7 @@ final class SessionTokenParser: @unchecked Sendable {
 
         for (_, deltas) in deltaCache {
             for delta in deltas {
-                guard delta.timestamp > windowStart else { continue }
+                if let windowStart, delta.timestamp <= windowStart { continue }
 
                 let profileId: UUID?
                 if let activeProfileId,
@@ -352,16 +344,24 @@ final class SessionTokenParser: @unchecked Sendable {
             }
         }
 
-        // Build full 7-day array for each profile (zero for missing days)
+        // Build full range array for each profile (zero for missing days)
         let today = calendar.startOfDay(for: Date())
+        let startDay: Date = {
+            if let windowStart {
+                return calendar.startOfDay(for: windowStart)
+            }
+            let allDays = dailyTokens.values.flatMap { $0.keys }
+            return allDays.min().map { calendar.startOfDay(for: $0) } ?? today
+        }()
         var result: [UUID: [DailyUsage]] = [:]
         for profile in profiles {
             let dayData = dailyTokens[profile.id] ?? [:]
             var days: [DailyUsage] = []
-            for offset in (0..<7).reversed() {
-                if let day = calendar.date(byAdding: .day, value: -offset, to: today) {
-                    days.append(DailyUsage(dayStart: day, tokens: dayData[day] ?? 0))
-                }
+            var day = startDay
+            while day <= today {
+                days.append(DailyUsage(dayStart: day, tokens: dayData[day] ?? 0))
+                guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = nextDay
             }
             result[profile.id] = days
         }
@@ -399,12 +399,16 @@ final class SessionTokenParser: @unchecked Sendable {
 
     // MARK: - Insights (Projects / Sessions / Heatmap / Expensive Turns)
 
-    func calculateInsights() -> CodexInsights {
+    func calculateInsights(range: AnalyticsTimeRange = .allTime) -> CodexInsights {
         let metaCache = refreshSessionMetaCache()
         guard !metaCache.isEmpty else { return .empty }
 
         let calendar = Calendar.current
-        let allMeta = metaCache.values
+        let cutoff = cutoffDate(for: range)
+        let allMeta = metaCache.values.filter { meta in
+            guard let cutoff else { return true }
+            return Date(timeIntervalSince1970: meta.startTime) > cutoff
+        }
 
         // ── 1. Projects ──────────────────────────────────────────────────
         var projectTokens:   [String: Int]    = [:]
@@ -475,13 +479,12 @@ final class SessionTokenParser: @unchecked Sendable {
             .sorted { $0.timestamp > $1.timestamp }
 
         // ── 3. Hourly activity (last 30 days, grouped by dow × hour) ────
-        let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
         var hourlyMap: [String: Int] = [:]    // "dow-hour" → tokens
 
         for meta in allMeta {
             for turn in meta.turns {
                 let date = Date(timeIntervalSince1970: turn.timestamp)
-                guard date > cutoff else { continue }
+                if let cutoff, date <= cutoff { continue }
                 let components = calendar.dateComponents([.weekday, .hour], from: date)
                 // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
                 let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
@@ -502,11 +505,13 @@ final class SessionTokenParser: @unchecked Sendable {
         }
 
         // ── 4. Expensive turns (top 20 by USD cost) ──────────────────────
-        let allTurns: [ExpensiveTurn] = metaCache.values.flatMap { meta -> [ExpensiveTurn] in
+        let allTurns: [ExpensiveTurn] = allMeta.flatMap { meta -> [ExpensiveTurn] in
             let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
             let name = path == "unknown" ? "Unknown"
                      : URL(fileURLWithPath: path).lastPathComponent
-            return meta.turns.map { turn in
+            return meta.turns.compactMap { turn in
+                let turnDate = Date(timeIntervalSince1970: turn.timestamp)
+                if let cutoff, turnDate <= cutoff { return nil }
                 let turnUsage = AccountTokenUsage(
                     inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens,
                     outputTokens: turn.outputTokens, reasoningTokens: 0,
@@ -534,6 +539,11 @@ final class SessionTokenParser: @unchecked Sendable {
             sessions: sessions,
             hourlyActivity: hourlyActivity,
             expensiveTurns: expensiveTurns)
+    }
+
+    private func cutoffDate(for range: AnalyticsTimeRange) -> Date? {
+        guard let days = range.dayWindow else { return nil }
+        return Date().addingTimeInterval(-Double(days) * 24 * 3600)
     }
 
     // MARK: - Session Meta Cache

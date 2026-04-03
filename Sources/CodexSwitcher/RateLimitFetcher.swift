@@ -5,6 +5,13 @@ struct AuthCredentials: Sendable {
     let accountId: String
 }
 
+struct RateLimitFetchDiagnostic: Sendable {
+    let checkedAt: Date
+    let httpStatusCode: Int?
+    let staleReason: RateLimitStaleReason?
+    let failureSummary: String?
+}
+
 struct RateLimitInfo: Sendable {
     var planType: String = "free"
     var allowed: Bool = true
@@ -47,9 +54,9 @@ struct RateLimitInfo: Sendable {
 }
 
 enum FetchResult: Sendable {
-    case success(RateLimitInfo)
-    case stale
-    case failure
+    case success(RateLimitInfo, RateLimitFetchDiagnostic)
+    case stale(RateLimitFetchDiagnostic)
+    case failure(RateLimitFetchDiagnostic)
 }
 
 final class RateLimitFetcher: @unchecked Sendable {
@@ -67,6 +74,7 @@ final class RateLimitFetcher: @unchecked Sendable {
     }
 
     func fetch(credentials: AuthCredentials) async -> FetchResult {
+        let checkedAt = Date()
         var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
         req.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(credentials.accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
@@ -78,19 +86,57 @@ final class RateLimitFetcher: @unchecked Sendable {
             (data, response) = try await session.data(for: req)
         } catch {
             print("[RateLimit] fetch error for \(credentials.accountId): \(error)")
-            return .failure
+            return .failure(
+                RateLimitFetchDiagnostic(
+                    checkedAt: checkedAt,
+                    httpStatusCode: nil,
+                    staleReason: nil,
+                    failureSummary: error.localizedDescription
+                )
+            )
         }
 
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         switch statusCode {
         case 200:
-            guard let info = parse(data) else { return .failure }
-            return .success(info)
+            guard let info = parse(data) else {
+                return .failure(
+                    RateLimitFetchDiagnostic(
+                        checkedAt: checkedAt,
+                        httpStatusCode: statusCode,
+                        staleReason: nil,
+                        failureSummary: "Invalid usage payload"
+                    )
+                )
+            }
+            return .success(
+                info,
+                RateLimitFetchDiagnostic(
+                    checkedAt: checkedAt,
+                    httpStatusCode: statusCode,
+                    staleReason: nil,
+                    failureSummary: nil
+                )
+            )
         case 401, 403:
-            return .stale
+            return .stale(
+                RateLimitFetchDiagnostic(
+                    checkedAt: checkedAt,
+                    httpStatusCode: statusCode,
+                    staleReason: statusCode == 401 ? .unauthorized : .forbidden,
+                    failureSummary: nil
+                )
+            )
         default:
-            return .failure
+            return .failure(
+                RateLimitFetchDiagnostic(
+                    checkedAt: checkedAt,
+                    httpStatusCode: statusCode,
+                    staleReason: nil,
+                    failureSummary: "HTTP \(statusCode)"
+                )
+            )
         }
     }
 

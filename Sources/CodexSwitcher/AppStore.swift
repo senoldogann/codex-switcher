@@ -21,26 +21,41 @@ final class AppStore: ObservableObject {
     @Published var switchHistory: [SwitchEvent] = []
     @Published var tokenUsage: [UUID: AccountTokenUsage] = [:]
     @Published var staleProfileIds: Set<UUID> = []
+    @Published var rateLimitHealth: [UUID: RateLimitHealthStatus] = [:]
     @Published var costs: [UUID: Double] = [:]
     @Published var forecasts: [UUID: RateLimitForecast] = [:]
     @Published var dailyUsage: [UUID: [DailyUsage]] = [:]
     @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
     @Published var isSessionActive: Bool = false  // live session indicator
 
-    @Published var availableUpdate: UpdateChecker.Release? = nil
+    @Published var updateStatus: UpdateStatusSnapshot = .idle(currentVersion: UpdateChecker.currentVersion())
     @Published var projectUsage: [ProjectUsage] = []
     @Published var sessionSummaries: [SessionSummary] = []
     @Published var hourlyActivity: [HourlyActivity] = []
     @Published var expensiveTurns: [ExpensiveTurn] = []
+    @Published var analyticsTimeRange: AnalyticsTimeRange = .sevenDays
 
     private var lastBudgetAlertDate: Date?
     private var lastWeeklySummaryDate: Date?
 
+    var availableUpdate: UpdateReleaseInfo? {
+        updateStatus.state == .updateAvailable ? updateStatus.release : nil
+    }
+
     func checkForUpdates() {
         Task {
-            let release = await UpdateChecker.fetchIfNewer()
-            await MainActor.run { self.availableUpdate = release }
-            if let release {
+            let prior = updateStatus
+            await MainActor.run {
+                self.updateStatus = .checking(
+                    currentVersion: prior.currentVersion,
+                    latestVersion: prior.latestVersion,
+                    release: prior.release,
+                    lastCheckedAt: prior.lastCheckedAt
+                )
+            }
+            let snapshot = await UpdateChecker.check()
+            await MainActor.run { self.updateStatus = snapshot }
+            if let release = snapshot.release, snapshot.state == .updateAvailable {
                 sendNotification(
                     title: L("Güncelleme mevcut", "Update available"),
                     body: "CodexSwitcher \(release.version)"
@@ -53,9 +68,18 @@ final class AppStore: ObservableObject {
     /// Checks for updates and always opens the releases page (shows feedback even when up to date).
     func checkForUpdatesManually() {
         Task {
-            let release = await UpdateChecker.fetchIfNewer()
+            let prior = updateStatus
             await MainActor.run {
-                self.availableUpdate = release
+                self.updateStatus = .checking(
+                    currentVersion: prior.currentVersion,
+                    latestVersion: prior.latestVersion,
+                    release: prior.release,
+                    lastCheckedAt: prior.lastCheckedAt
+                )
+            }
+            let snapshot = await UpdateChecker.check()
+            await MainActor.run {
+                self.updateStatus = snapshot
                 // Always open releases page so the user sees something happened
                 self.openReleasePage()
             }
@@ -63,7 +87,7 @@ final class AppStore: ObservableObject {
     }
 
     func openReleasePage() {
-        if let url = availableUpdate?.releaseURL {
+        if let url = updateStatus.release?.releaseURL {
             NSWorkspace.shared.open(url)
         } else {
             NSWorkspace.shared.open(URL(string: "https://github.com/senoldogann/codex-switcher/releases")!)
@@ -84,6 +108,11 @@ final class AppStore: ObservableObject {
     private var authWatcher: DispatchSourceFileSystemObject?
     private var authWatcherFd: Int32 = -1
     private var loginTimeout: DispatchWorkItem?
+    private var loginProcess: Process?
+    private var loginOutputPipe: Pipe?
+    private var loginOutputBuffer = ""
+    private var didOpenLoginBrowser = false
+    private var suppressLoginFailureFeedback = false
     private var lastAutoSwitchDate: Date?
     private var rateLimitCheckPending = false
     private var lastAuthWriteDate: Date?
@@ -183,9 +212,18 @@ final class AppStore: ObservableObject {
         var successCount = 0
         for (id, result) in results {
             switch result {
-            case .success(let info):
+            case .success(let info, let diagnostic):
                 rateLimits[id] = info
                 successCount += 1
+                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
+                rateLimitHealth[id] = RateLimitHealthStatus(
+                    lastCheckedAt: diagnostic.checkedAt,
+                    lastSuccessfulFetchAt: diagnostic.checkedAt,
+                    lastFailedFetchAt: previous.lastFailedFetchAt,
+                    lastHTTPStatusCode: diagnostic.httpStatusCode,
+                    staleReason: nil,
+                    failureSummary: nil
+                )
                 let profileName = profiles.first(where: { $0.id == id })?.displayName ?? L("Hesap", "Account")
                 // Restored notification
                 if lastKnownLimitState[id] == true, info.limitReached == false {
@@ -206,10 +244,27 @@ final class AppStore: ObservableObject {
                         body: L("\(profileName) haftalık limitinin %\(100 - used)'i kaldı", "\(profileName) has \(100 - used)% weekly limit remaining")
                     )
                 }
-            case .stale:
+            case .stale(let diagnostic):
                 newStale.insert(id)
-            case .failure:
-                break
+                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
+                rateLimitHealth[id] = RateLimitHealthStatus(
+                    lastCheckedAt: diagnostic.checkedAt,
+                    lastSuccessfulFetchAt: previous.lastSuccessfulFetchAt,
+                    lastFailedFetchAt: diagnostic.checkedAt,
+                    lastHTTPStatusCode: diagnostic.httpStatusCode,
+                    staleReason: diagnostic.staleReason,
+                    failureSummary: diagnostic.failureSummary
+                )
+            case .failure(let diagnostic):
+                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
+                rateLimitHealth[id] = RateLimitHealthStatus(
+                    lastCheckedAt: diagnostic.checkedAt,
+                    lastSuccessfulFetchAt: previous.lastSuccessfulFetchAt,
+                    lastFailedFetchAt: diagnostic.checkedAt,
+                    lastHTTPStatusCode: diagnostic.httpStatusCode,
+                    staleReason: nil,
+                    failureSummary: diagnostic.failureSummary
+                )
             }
         }
 
@@ -235,10 +290,11 @@ final class AppStore: ObservableObject {
         let history  = self.switchHistory
         let parser   = self.tokenParser
         let activeProfileId = self.activeProfile?.id
+        let range = self.analyticsTimeRange
         DispatchQueue.global(qos: .utility).async {
             let result   = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
-            let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId)
-            let insights = parser.calculateInsights()
+            let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId, range: range)
+            let insights = parser.calculateInsights(range: range)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 guard self.profiles.count == profiles.count else { return }
@@ -395,6 +451,12 @@ final class AppStore: ObservableObject {
             config.activeProfileId = first.id
             profileManager.saveConfig(config)
         }
+    }
+
+    func setAnalyticsTimeRange(_ range: AnalyticsTimeRange) {
+        guard analyticsTimeRange != range else { return }
+        analyticsTimeRange = range
+        refreshTokenUsage()
     }
 
     // MARK: - Smart Switch
@@ -654,8 +716,11 @@ final class AppStore: ObservableObject {
         isAddingAccount = true
         addingStep = .waitingLogin
 
-        openTerminalWithCodexLogin()
         watchAuthFileForNewLogin()
+        guard startCodexLogin() else {
+            stopAuthWatcher()
+            return
+        }
 
         cancelLoginTimeout()
         let timeout = DispatchWorkItem { [weak self] in self?.loginTimedOut() }
@@ -697,6 +762,7 @@ final class AppStore: ObservableObject {
     private func loginTimedOut() {
         guard addingStep == .waitingLogin else { return }
         cancelLoginTimeout()
+        stopCodexLoginProcess(suppressFailureFeedback: true)
         addingStep = .idle
         isAddingAccount = false
         stopAuthWatcher()
@@ -707,6 +773,7 @@ final class AppStore: ObservableObject {
             cancelAddAccount()
             return
         }
+        stopCodexLoginProcess(suppressFailureFeedback: true)
         var config = profileManager.loadConfig()
         var profile = newProfile
         let shouldActivate = config.activeProfileId == nil
@@ -730,6 +797,7 @@ final class AppStore: ObservableObject {
 
     func cancelAddAccount() {
         cancelLoginTimeout()
+        stopCodexLoginProcess(suppressFailureFeedback: true)
         isAddingAccount = false
         addingStep = .idle
         pendingProfileEmail = ""
@@ -783,8 +851,12 @@ final class AppStore: ObservableObject {
 
     func beginRelogin(for profile: Profile) {
         reloginTargetId = profile.id
-        openTerminalWithCodexLogin()
         watchAuthFileForRelogin()
+        guard startCodexLogin() else {
+            reloginTargetId = nil
+            stopAuthWatcher()
+            return
+        }
     }
 
     private func watchAuthFileForRelogin() {
@@ -898,16 +970,108 @@ final class AppStore: ObservableObject {
 
     // MARK: - Helpers
 
-    private func openTerminalWithCodexLogin() {
-        // codex login opens a browser and writes auth.json — no terminal needed
+    @discardableResult
+    private func startCodexLogin() -> Bool {
+        stopCodexLoginProcess(suppressFailureFeedback: true)
+
         let codexPath = findCLIPath("codex")
+        guard FileManager.default.isExecutableFile(atPath: codexPath) else {
+            isAddingAccount = false
+            addingStep = .idle
+            sendNotification(
+                title: L("Login başlatılamadı", "Login could not start"),
+                body: L("`codex` komutu bulunamadı.", "`codex` command was not found.")
+            )
+            return false
+        }
+
+        let pipe = Pipe()
         let task = Process()
         task.executableURL = URL(fileURLWithPath: codexPath)
         task.arguments = ["login"]
         task.standardInput = nil
-        task.standardOutput = nil
-        task.standardError = nil
-        try? task.run()
+        task.standardOutput = pipe
+        task.standardError = pipe
+
+        loginOutputPipe = pipe
+        loginOutputBuffer = ""
+        didOpenLoginBrowser = false
+        suppressLoginFailureFeedback = false
+
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            DispatchQueue.main.async {
+                self?.handleCodexLoginOutput(data)
+            }
+        }
+
+        task.terminationHandler = { [weak self] process in
+            DispatchQueue.main.async {
+                self?.handleCodexLoginTermination(status: process.terminationStatus)
+            }
+        }
+
+        do {
+            try task.run()
+            loginProcess = task
+            return true
+        } catch {
+            stopCodexLoginProcess(suppressFailureFeedback: true)
+            isAddingAccount = false
+            addingStep = .idle
+            sendNotification(
+                title: L("Login başlatılamadı", "Login could not start"),
+                body: error.localizedDescription
+            )
+            return false
+        }
+    }
+
+    private func handleCodexLoginOutput(_ data: Data) {
+        guard let chunk = String(data: data, encoding: .utf8), !chunk.isEmpty else { return }
+        loginOutputBuffer += chunk
+
+        guard !didOpenLoginBrowser,
+              let url = CodexLoginOutputParser.authorizationURL(in: loginOutputBuffer) else { return }
+
+        didOpenLoginBrowser = true
+        NSWorkspace.shared.open(url)
+    }
+
+    private func handleCodexLoginTermination(status: Int32) {
+        guard loginProcess != nil else { return }
+        let shouldReportFailure = status != 0 && !suppressLoginFailureFeedback && addingStep == .waitingLogin
+
+        stopCodexLoginProcess(suppressFailureFeedback: true)
+
+        if shouldReportFailure {
+            cancelLoginTimeout()
+            isAddingAccount = false
+            addingStep = .idle
+            stopAuthWatcher()
+            sendNotification(
+                title: L("Login başlatılamadı", "Login could not start"),
+                body: L("Codex login süreci erken kapandı. Browser linki üretilemedi.", "Codex login exited early before it could provide a browser link.")
+            )
+        }
+    }
+
+    private func stopCodexLoginProcess(suppressFailureFeedback: Bool) {
+        if suppressFailureFeedback {
+            self.suppressLoginFailureFeedback = true
+        }
+
+        loginOutputPipe?.fileHandleForReading.readabilityHandler = nil
+        loginOutputPipe = nil
+
+        if let process = loginProcess, process.isRunning {
+            process.terminate()
+        }
+
+        loginProcess = nil
+        loginOutputBuffer = ""
+        didOpenLoginBrowser = false
     }
 
     private func notifyProfileChanged() {

@@ -150,6 +150,8 @@ struct MenuContentView: View {
             .frame(height: 36)
             .padding(.horizontal, 14)
 
+            analyticsRangeBar
+
             Divider().background(gw.opacity(0.06))
 
             Group {
@@ -192,6 +194,36 @@ struct MenuContentView: View {
 
     private var tabDivider: some View {
         Divider().frame(height: 14).background(gw.opacity(0.08))
+    }
+
+    private var analyticsRangeBar: some View {
+        HStack(spacing: 8) {
+            Text(L("Aralık", "Range"))
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(gw.opacity(0.28))
+
+            ForEach(AnalyticsTimeRange.allCases, id: \.rawValue) { range in
+                Button {
+                    store.setAnalyticsTimeRange(range)
+                } label: {
+                    Text(range.title)
+                        .font(.system(size: 9, weight: store.analyticsTimeRange == range ? .semibold : .regular))
+                        .foregroundStyle(store.analyticsTimeRange == range ? gw.opacity(0.72) : gw.opacity(0.3))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(store.analyticsTimeRange == range ? gw.opacity(0.08) : .clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 6)
     }
 
     private func iconTab(_ icon: String, _ label: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
@@ -325,6 +357,14 @@ struct MenuContentView: View {
                         ProgressView()
                             .scaleEffect(0.5)
                             .frame(height: 12)
+                    }
+
+                    if let health = store.rateLimitHealth[profile.id],
+                       let healthLine = healthLine(for: health, profileId: profile.id) {
+                        Text(healthLine)
+                            .font(.system(size: 9))
+                            .foregroundStyle(gw.opacity(0.25))
+                            .lineLimit(1)
                     }
 
                     if let u = usage, u.totalTokens > 0 {
@@ -691,7 +731,39 @@ struct MenuContentView: View {
                 }
             }
             .frame(height: 36)
+
+            updateStatusStrip
         }
+    }
+
+    private var updateStatusStrip: some View {
+        HStack(spacing: 8) {
+            Text("v\(store.updateStatus.currentVersion)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(gw.opacity(0.42))
+
+            Text("→")
+                .font(.system(size: 9))
+                .foregroundStyle(gw.opacity(0.18))
+
+            Text(store.updateStatus.latestVersion.map { "v\($0)" } ?? "—")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(gw.opacity(0.34))
+
+            if let lastCheckedAt = store.updateStatus.lastCheckedAt {
+                Text("· \(L("Son kontrol", "Checked")) \(compactTime(lastCheckedAt))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.22))
+            }
+
+            Spacer()
+
+            Text(updateStateLabel)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(updateStateColor.opacity(0.72))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
     }
 
     // MARK: - Budget
@@ -756,5 +828,58 @@ struct MenuContentView: View {
         }
         .buttonStyle(.plain)
         .pointerCursor()
+    }
+
+    private var updateStateLabel: String {
+        switch store.updateStatus.state {
+        case .idle: return L("Hazır", "Idle")
+        case .checking: return L("Kontrol", "Checking")
+        case .upToDate: return L("Güncel", "Up to date")
+        case .updateAvailable: return L("Update var", "Update available")
+        case .failed: return L("Hata", "Failed")
+        }
+    }
+
+    private var updateStateColor: Color {
+        switch store.updateStatus.state {
+        case .idle: return gw.opacity(0.3)
+        case .checking: return .blue
+        case .upToDate: return .green
+        case .updateAvailable: return .orange
+        case .failed: return .red
+        }
+    }
+
+    private func compactTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "d MMM HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func healthLine(for health: RateLimitHealthStatus, profileId: UUID) -> String? {
+        if store.staleProfileIds.contains(profileId) {
+            var parts: [String] = [L("Stale", "Stale")]
+            if let reason = health.staleReason?.summary {
+                parts.append(reason)
+            }
+            if let lastOk = health.lastSuccessfulFetchAt {
+                parts.append("\(L("son ok", "last ok")) \(compactTime(lastOk))")
+            }
+            return parts.joined(separator: " · ")
+        }
+
+        if let failure = health.failureSummary {
+            var parts: [String] = [failure]
+            if let code = health.lastHTTPStatusCode {
+                parts.append("HTTP \(code)")
+            }
+            if let lastOk = health.lastSuccessfulFetchAt {
+                parts.append("\(L("son ok", "last ok")) \(compactTime(lastOk))")
+            }
+            return parts.joined(separator: " · ")
+        }
+
+        return nil
     }
 }
