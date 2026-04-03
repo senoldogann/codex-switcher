@@ -110,6 +110,82 @@ struct SwitchReliabilitySnapshot: Equatable {
     var fallbackRestartCount: Int = 0
 }
 
+struct SwitchTimelineEvent: Codable, Identifiable, Equatable {
+    enum Stage: String, Codable {
+        case queued
+        case ready
+        case verifying
+        case seamlessSuccess
+        case fallbackRestart
+        case inconclusive
+    }
+
+    let id: UUID
+    let timestamp: Date
+    let stage: Stage
+    let targetProfileName: String
+    let reason: String?
+    let detail: String
+    let waitDurationSeconds: Int?
+    let verificationDurationSeconds: Int?
+}
+
+enum AutomationConfidenceStatus: String, Codable {
+    case healthy
+    case warning
+    case critical
+}
+
+struct AutomationConfidenceSummary: Equatable {
+    let status: AutomationConfidenceStatus
+    let highlight: String
+    let staleProfileCount: Int
+    let fallbackRestartCount: Int
+    let seamlessSuccessCount: Int
+    let stuckPendingSwitch: Bool
+    let lastVerifiedSwitchAt: Date?
+
+    static let empty = AutomationConfidenceSummary(
+        status: .healthy,
+        highlight: "Automation looks healthy.",
+        staleProfileCount: 0,
+        fallbackRestartCount: 0,
+        seamlessSuccessCount: 0,
+        stuckPendingSwitch: false,
+        lastVerifiedSwitchAt: nil
+    )
+}
+
+enum AccountReliabilityStatus: String, Codable {
+    case healthy
+    case warning
+    case critical
+}
+
+struct AccountReliabilitySummary: Identifiable, Equatable {
+    var id: UUID { profileId }
+
+    let profileId: UUID
+    let profileName: String
+    let status: AccountReliabilityStatus
+    let detail: String
+    let lastCheckedAt: Date?
+    let cost: Double?
+    let riskLabel: String?
+}
+
+enum AutomationAlertSeverity: String, Codable {
+    case warning
+    case critical
+}
+
+struct AutomationAlert: Equatable {
+    let fingerprint: String
+    let severity: AutomationAlertSeverity
+    let title: String
+    let body: String
+}
+
 // MARK: - Switch History
 
 struct SwitchEvent: Codable, Identifiable {

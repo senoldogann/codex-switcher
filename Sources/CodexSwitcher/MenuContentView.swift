@@ -147,13 +147,15 @@ struct MenuContentView: View {
             analyticsRangeBar
 
             switchReliabilitySummary
+            automationConfidenceCard
+            accountReliabilityStrip
 
             Divider().background(gw.opacity(0.06))
 
             Group {
                 switch historyTab {
                 case .list:
-                    if store.switchHistory.isEmpty {
+                    if store.switchHistory.isEmpty && store.switchTimeline.isEmpty {
                         Text(Str.noHistory)
                             .font(.system(size: 12))
                             .foregroundStyle(gw.opacity(0.35))
@@ -161,9 +163,20 @@ struct MenuContentView: View {
                     } else {
                         ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(spacing: 0) {
-                                ForEach(store.switchHistory.reversed()) { event in
-                                    historyRow(event)
-                                    Divider().background(gw.opacity(0.05))
+                                if !store.switchTimeline.isEmpty {
+                                    sectionLabel(L("Otomasyon", "Automation"))
+                                    ForEach(Array(store.switchTimeline.reversed().prefix(12))) { event in
+                                        timelineRow(event)
+                                        Divider().background(gw.opacity(0.05))
+                                    }
+                                }
+
+                                if !store.switchHistory.isEmpty {
+                                    sectionLabel(L("Geçişler", "Switches"))
+                                    ForEach(store.switchHistory.reversed()) { event in
+                                        historyRow(event)
+                                        Divider().background(gw.opacity(0.05))
+                                    }
                                 }
                             }
                         }
@@ -252,6 +265,88 @@ struct MenuContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
+    }
+
+    private var automationConfidenceCard: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(automationConfidenceColor.opacity(0.12))
+                    .frame(width: 28, height: 28)
+                Image(systemName: automationConfidenceIcon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(automationConfidenceColor.opacity(0.82))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(L("Automation confidence", "Automation confidence"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.72))
+                    Text(automationConfidenceLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(automationConfidenceColor.opacity(0.82))
+                }
+
+                Text(store.automationConfidence.highlight)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.32))
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    metricCapsule(label: L("Stale", "Stale"), value: "\(store.automationConfidence.staleProfileCount)")
+                    metricCapsule(label: L("Fallback", "Fallback"), value: "\(store.automationConfidence.fallbackRestartCount)")
+                    metricCapsule(label: L("Seamless", "Seamless"), value: "\(store.automationConfidence.seamlessSuccessCount)")
+                    if let lastVerifiedSwitchAt = store.automationConfidence.lastVerifiedSwitchAt {
+                        metricCapsule(label: L("Last verified", "Last verified"), value: relativeShort(lastVerifiedSwitchAt))
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+
+    private var accountReliabilityStrip: some View {
+        Group {
+            if !store.accountReliability.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(L("Accounts needing attention", "Accounts needing attention"))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(gw.opacity(0.28))
+                            .textCase(.uppercase)
+                        Spacer()
+                    }
+
+                    ForEach(Array(store.accountReliability.prefix(3))) { summary in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(accountReliabilityColor(summary.status).opacity(0.85))
+                                .frame(width: 6, height: 6)
+                            Text(summary.profileName)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(gw.opacity(0.68))
+                                .lineLimit(1)
+                            Text(summary.detail)
+                                .font(.system(size: 9))
+                                .foregroundStyle(gw.opacity(0.28))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            if let riskLabel = summary.riskLabel {
+                                Text(riskLabel)
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(accountReliabilityColor(summary.status).opacity(0.7))
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+        }
     }
 
     private func iconTab(_ icon: String, _ label: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
@@ -652,6 +747,157 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func timelineRow(_ event: SwitchTimelineEvent) -> some View {
+        let iconName: String = {
+            switch event.stage {
+            case .queued: return "pause.circle.fill"
+            case .ready: return "checkmark.circle"
+            case .verifying: return "ellipsis.circle"
+            case .seamlessSuccess: return "bolt.horizontal.circle.fill"
+            case .fallbackRestart: return "arrow.clockwise.circle.fill"
+            case .inconclusive: return "questionmark.circle"
+            }
+        }()
+
+        let tint: Color = {
+            switch event.stage {
+            case .queued: return .orange
+            case .ready: return .yellow
+            case .verifying: return .blue
+            case .seamlessSuccess: return .green
+            case .fallbackRestart: return .blue
+            case .inconclusive: return gw
+            }
+        }()
+
+        return HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.12))
+                    .frame(width: 26, height: 26)
+                Image(systemName: iconName)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(tint.opacity(0.85))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Text(timelineStageLabel(event.stage))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.74))
+                    Text(event.targetProfileName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(gw.opacity(0.42))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text(event.timestamp, style: .relative)
+                        .font(.system(size: 9))
+                        .foregroundStyle(gw.opacity(0.24))
+                }
+
+                Text(event.detail)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.3))
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    if let reason = event.reason, !reason.isEmpty {
+                        metricCapsule(label: L("Sebep", "Reason"), value: reason)
+                    }
+                    if let wait = event.waitDurationSeconds {
+                        metricCapsule(label: L("Bekleme", "Wait"), value: "\(wait)s")
+                    }
+                    if let verification = event.verificationDurationSeconds {
+                        metricCapsule(label: L("Doğrulama", "Verify"), value: "\(verification)s")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(gw.opacity(0.28))
+                .textCase(.uppercase)
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private func metricCapsule(label: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 8))
+                .foregroundStyle(gw.opacity(0.22))
+            Text(value)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(gw.opacity(0.42))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(gw.opacity(0.05))
+        )
+    }
+
+    private var automationConfidenceColor: Color {
+        switch store.automationConfidence.status {
+        case .healthy: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private var automationConfidenceIcon: String {
+        switch store.automationConfidence.status {
+        case .healthy: return "checkmark.shield.fill"
+        case .warning: return "exclamationmark.shield.fill"
+        case .critical: return "bolt.shield.fill"
+        }
+    }
+
+    private var automationConfidenceLabel: String {
+        switch store.automationConfidence.status {
+        case .healthy: return L("Healthy", "Healthy")
+        case .warning: return L("Attention", "Attention")
+        case .critical: return L("Critical", "Critical")
+        }
+    }
+
+    private func accountReliabilityColor(_ status: AccountReliabilityStatus) -> Color {
+        switch status {
+        case .healthy: return .green
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private func relativeShort(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func timelineStageLabel(_ stage: SwitchTimelineEvent.Stage) -> String {
+        switch stage {
+        case .queued: return L("Kuyrukta", "Queued")
+        case .ready: return L("Hazır", "Ready")
+        case .verifying: return L("Doğrulanıyor", "Verifying")
+        case .seamlessSuccess: return L("Sessiz geçiş", "Seamless")
+        case .fallbackRestart: return L("Fallback restart", "Fallback restart")
+        case .inconclusive: return L("Belirsiz", "Inconclusive")
+        }
     }
 
     // MARK: - Profile Avatar

@@ -25,6 +25,8 @@ struct SwitchOrchestratorTests {
         #expect(orchestrator.pendingRequest == request)
         #expect(orchestrator.reliability.pendingSwitchCount == 1)
         #expect(orchestrator.lastResult?.outcome == .deferred)
+        #expect(orchestrator.timelineEvents.count == 1)
+        #expect(orchestrator.timelineEvents.first?.stage == .queued)
     }
 
     @Test
@@ -52,23 +54,30 @@ struct SwitchOrchestratorTests {
     @Test
     func readySwitchIfPossibleWaitsUntilSessionIsIdle() {
         var orchestrator = SwitchOrchestrator()
+        let queuedAt = Date(timeIntervalSince1970: 1_700_000_200)
         let request = PendingSwitchRequest(
             targetProfileId: UUID(),
             targetProfileName: "Account 2",
             reason: "Limit reached",
-            queuedAt: Date()
+            queuedAt: queuedAt
         )
-        _ = orchestrator.queue(request: request, detail: "deferred")
+        _ = orchestrator.queue(request: request, detail: "deferred", now: queuedAt)
 
         #expect(orchestrator.readySwitchIfPossible(isSessionActive: true) == nil)
         #expect(orchestrator.state == .pendingSwitch)
 
-        let ready = orchestrator.readySwitchIfPossible(isSessionActive: false)
+        let ready = orchestrator.readySwitchIfPossible(
+            isSessionActive: false,
+            now: queuedAt.addingTimeInterval(8)
+        )
 
         #expect(ready == request)
         #expect(orchestrator.pendingRequest == nil)
         #expect(orchestrator.state == .readyToSwitch)
         #expect(orchestrator.reliability.completedDeferredSwitchCount == 1)
+        #expect(orchestrator.timelineEvents.count == 2)
+        #expect(orchestrator.timelineEvents.last?.stage == .ready)
+        #expect(orchestrator.timelineEvents.last?.waitDurationSeconds == 8)
     }
 
     @Test
@@ -96,37 +105,71 @@ struct SwitchOrchestratorTests {
         #expect(orchestrator.state == .verifying)
         #expect(orchestrator.verificationAttempt?.targetProfileId == profileId)
         #expect(orchestrator.verificationAttempt?.startedAt == now)
+        #expect(orchestrator.timelineEvents.last?.stage == .verifying)
     }
 
     @Test
     func completeSeamlessSuccessClearsVerification() {
         var orchestrator = SwitchOrchestrator()
+        let now = Date(timeIntervalSince1970: 1_700_000_600)
         orchestrator.startVerifying(
             targetProfileId: UUID(),
-            targetProfileName: "Account 2"
+            targetProfileName: "Account 2",
+            now: now
         )
 
-        orchestrator.completeSeamlessSuccess(detail: "Seamless switch verified.")
+        orchestrator.completeSeamlessSuccess(
+            detail: "Seamless switch verified.",
+            now: now.addingTimeInterval(3)
+        )
 
         #expect(orchestrator.state == .idle)
         #expect(orchestrator.verificationAttempt == nil)
         #expect(orchestrator.lastResult?.outcome == .seamlessSuccess)
         #expect(orchestrator.reliability.seamlessSuccessCount == 1)
+        #expect(orchestrator.timelineEvents.last?.stage == .seamlessSuccess)
+        #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == 3)
     }
 
     @Test
     func markInconclusiveClearsVerification() {
         var orchestrator = SwitchOrchestrator()
+        let now = Date(timeIntervalSince1970: 1_700_000_700)
         orchestrator.startVerifying(
             targetProfileId: UUID(),
-            targetProfileName: "Account 2"
+            targetProfileName: "Account 2",
+            now: now
         )
 
-        orchestrator.markInconclusive(detail: "No request observed.")
+        orchestrator.markInconclusive(
+            detail: "No request observed.",
+            now: now.addingTimeInterval(45)
+        )
 
         #expect(orchestrator.state == .idle)
         #expect(orchestrator.verificationAttempt == nil)
         #expect(orchestrator.lastResult?.outcome == .inconclusive)
         #expect(orchestrator.reliability.inconclusiveCount == 1)
+        #expect(orchestrator.timelineEvents.last?.stage == .inconclusive)
+        #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == 45)
+    }
+
+    @Test
+    func recordFallbackRestartCapturesTimelineMetadata() {
+        var orchestrator = SwitchOrchestrator()
+        let now = Date(timeIntervalSince1970: 1_700_000_800)
+        orchestrator.startVerifying(
+            targetProfileId: UUID(),
+            targetProfileName: "Account 4",
+            now: now
+        )
+
+        orchestrator.recordFallbackRestart(
+            detail: "Restart fallback was required.",
+            now: now.addingTimeInterval(4)
+        )
+
+        #expect(orchestrator.timelineEvents.last?.stage == .fallbackRestart)
+        #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == 4)
     }
 }

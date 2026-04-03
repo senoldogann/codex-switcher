@@ -39,6 +39,9 @@ final class AppStore: ObservableObject {
     @Published var pendingSwitchRequest: PendingSwitchRequest?
     @Published var lastSeamlessSwitchResult: SeamlessSwitchResult?
     @Published var switchReliability = SwitchReliabilitySnapshot()
+    @Published var switchTimeline: [SwitchTimelineEvent] = []
+    @Published var automationConfidence: AutomationConfidenceSummary = .empty
+    @Published var accountReliability: [AccountReliabilitySummary] = []
 
     private var lastBudgetAlertDate: Date?
     private var lastWeeklySummaryDate: Date?
@@ -107,9 +110,11 @@ final class AppStore: ObservableObject {
     private let usageTracker = SessionUsageTracker()
     private let fetcher = RateLimitFetcher()
     private let historyStore = SwitchHistoryStore()
+    private let switchTimelineStore = SwitchTimelineStore()
     private let tokenParser = SessionTokenParser()
     private var usageTimer: Timer?
     private var rateLimitTimer: Timer?
+    private var automationHealthTimer: Timer?
     private var authWatcher: DispatchSourceFileSystemObject?
     private var authWatcherFd: Int32 = -1
     private var loginTimeout: DispatchWorkItem?
@@ -129,6 +134,8 @@ final class AppStore: ObservableObject {
     private var sessionActivitySequence = 0
     private var switchOrchestrator = SwitchOrchestrator()
     private var seamlessVerificationWork: DispatchWorkItem?
+    private var syncedTimelineEventCount = 0
+    private var lastAutomationAlertFingerprint: String?
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -142,6 +149,8 @@ final class AppStore: ObservableObject {
         }
         loadProfiles()
         switchHistory = historyStore.load()
+        switchTimeline = switchTimelineStore.load()
+        refreshReliabilityAnalytics()
         requestNotificationPermission()
 
         usageMonitor.onRateLimit = { [weak self] in
@@ -158,6 +167,7 @@ final class AppStore: ObservableObject {
         usageMonitor.start()
         startUsagePolling()
         startRateLimitPolling()
+        startAutomationHealthPolling()
         refreshTokenUsage()
         syncSwitchOrchestrationState()
     }
@@ -170,6 +180,15 @@ final class AppStore: ObservableObject {
         // Arka planda her 5 dakikada sessizce güncelle (60s çok sıktı, pil tüketiyordu)
         rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.fetchAllRateLimits(showSpinner: false) }
+        }
+    }
+
+    private func startAutomationHealthPolling() {
+        automationHealthTimer?.invalidate()
+        automationHealthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshReliabilityAnalytics()
+            }
         }
     }
 
@@ -285,6 +304,7 @@ final class AppStore: ObservableObject {
         }
 
         staleProfileIds = newStale
+        refreshReliabilityAnalytics()
         NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
         refreshTokenUsage()
         // Note: updateCostsAndForecasts is called within refreshTokenUsage after async completion
@@ -333,6 +353,7 @@ final class AppStore: ObservableObject {
 
         costs = newCosts
         forecasts = newForecasts
+        refreshReliabilityAnalytics()
 
         checkBudget(costs: newCosts)
         checkWeeklySummary(costs: newCosts)
@@ -1141,7 +1162,10 @@ final class AppStore: ObservableObject {
     }
 
     private func processPendingSwitchIfNeeded(trigger: String) {
-        guard let pending = switchOrchestrator.readySwitchIfPossible(isSessionActive: isSessionActive) else { return }
+        guard let pending = switchOrchestrator.readySwitchIfPossible(
+            isSessionActive: isSessionActive,
+            now: Date()
+        ) else { return }
         guard let candidate = profiles.first(where: { $0.id == pending.targetProfileId }) else {
             switchOrchestrator.clearPending()
             syncSwitchOrchestrationState()
@@ -1236,6 +1260,48 @@ final class AppStore: ObservableObject {
         pendingSwitchRequest = switchOrchestrator.pendingRequest
         lastSeamlessSwitchResult = switchOrchestrator.lastResult
         switchReliability = switchOrchestrator.reliability
+
+        let timelineEvents = switchOrchestrator.timelineEvents
+        if timelineEvents.count > syncedTimelineEventCount {
+            let newEvents = Array(timelineEvents.dropFirst(syncedTimelineEventCount))
+            for event in newEvents {
+                switchTimelineStore.append(event)
+            }
+            switchTimeline.append(contentsOf: newEvents)
+            syncedTimelineEventCount = timelineEvents.count
+        }
+        refreshReliabilityAnalytics()
+    }
+
+    private func refreshReliabilityAnalytics(now: Date = Date()) {
+        automationConfidence = AutomationConfidenceCalculator.buildSummary(
+            profiles: profiles,
+            staleProfileIds: staleProfileIds,
+            rateLimitHealth: rateLimitHealth,
+            reliability: switchReliability,
+            pendingSwitchRequest: pendingSwitchRequest,
+            switchTimeline: switchTimeline,
+            now: now
+        )
+        accountReliability = AutomationConfidenceCalculator.buildAccountSummaries(
+            profiles: profiles,
+            staleProfileIds: staleProfileIds,
+            rateLimitHealth: rateLimitHealth,
+            forecasts: forecasts,
+            costs: costs,
+            now: now
+        )
+        emitAutomationAlertIfNeeded()
+    }
+
+    private func emitAutomationAlertIfNeeded() {
+        guard let alert = AutomationAlertPolicy.nextAlert(
+            summary: automationConfidence,
+            previousFingerprint: lastAutomationAlertFingerprint
+        ) else { return }
+
+        lastAutomationAlertFingerprint = alert.fingerprint
+        sendNotification(title: alert.title, body: alert.body)
     }
 
     private func notifyProfileChanged() {

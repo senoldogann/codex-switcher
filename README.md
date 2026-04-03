@@ -17,7 +17,7 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 ### Account Management
 - **Auto-switching** — Detects rate limits via API and switches to the best available account automatically
 - **Smart selection** — Picks the account with the lowest weekly usage %, not round-robin
-- **Codex auto-restart** — Force-quits and relaunches Codex after every switch (no manual exit needed)
+- **Seamless handoff first** — Prefers restart-free next-request switching and uses restart only as controlled fallback
 - **Switch verification** — Post-switch confirmation with automatic rollback on failure
 - **Re-login flow** — Refresh stale tokens without leaving the app
 - **Account aliases** — Friendly names per account, rename via right-click
@@ -45,6 +45,8 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 - **Account health indicators** — 🟢 healthy · 🟡 stale token · ⚪ unchecked · 🔒 exhausted
 - **Live session indicator** — Green pulse when tokens are actively being consumed
 - **Switch history** — Full log with type icons: ⚡ auto-switch · ↔ manual switch
+- **Automation timeline** — Queued, ready, verifying, seamless, fallback, and inconclusive switch events with timing details
+- **Automation confidence** — In-app health summary for stale auth, fallback pressure, and stuck pending switches
 - **Email privacy** — One-click blur toggle for email addresses
 - **Dark / Light mode** — Persistent appearance preference
 - **TR / EN language** — Turkish and English UI (auto-detects system language)
@@ -146,7 +148,9 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 - **Projects CSV fix** — CSV export now opens a real save flow and writes stable escaped output
 - **Safe switch boundary** — Auto-switches now queue during active work and execute after the session goes idle
 - **Seamless switch verification** — The app now prefers restart-free switching and only falls back to restarting Codex if post-switch limit behavior still indicates failure
-- **Reliability summary** — History now shows compact queued, seamless, and fallback switch metrics
+- **Switch timeline** — History now records queued, ready, verifying, seamless, fallback, and inconclusive events with wait and verification timing
+- **Automation confidence** — Added health summary and per-account attention strip for stale auth, fetch instability, and fallback pressure
+- **Automation alerts** — The app now emits deduplicated warnings when automation health degrades or a pending switch gets stuck
 - **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
 - **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
 
