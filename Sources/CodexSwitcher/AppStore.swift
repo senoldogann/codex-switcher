@@ -52,6 +52,19 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Called when the user manually taps the Update button.
+    /// Checks for updates and always opens the releases page (shows feedback even when up to date).
+    func checkForUpdatesManually() {
+        Task {
+            let release = await UpdateChecker.fetchIfNewer()
+            await MainActor.run {
+                self.availableUpdate = release
+                // Always open releases page so the user sees something happened
+                self.openReleasePage()
+            }
+        }
+    }
+
     func openReleasePage() {
         if let url = availableUpdate?.releaseURL {
             NSWorkspace.shared.open(url)

@@ -605,7 +605,7 @@ struct MenuContentView: View {
             if store.availableUpdate != nil {
                 store.openReleasePage()
             } else {
-                store.checkForUpdates()
+                store.checkForUpdatesManually()
             }
         } label: {
             ZStack(alignment: .topTrailing) {
