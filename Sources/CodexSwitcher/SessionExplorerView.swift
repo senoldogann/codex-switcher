@@ -3,12 +3,22 @@ import SwiftUI
 struct SessionExplorerView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.colorScheme) private var scheme
+    @State private var searchText = ""
 
     private var gw: Color { scheme == .dark ? .white : .black }
 
+    private var filteredSessions: [SessionSummary] {
+        guard !searchText.isEmpty else { return store.sessionSummaries }
+        let q = searchText.lowercased()
+        return store.sessionSummaries.filter {
+            $0.firstPrompt.lowercased().contains(q) ||
+            $0.projectName.lowercased().contains(q)
+        }
+    }
+
     /// Root sessions + their children grouped together
     private var trees: [(root: SessionSummary, children: [SessionSummary])] {
-        let all = store.sessionSummaries
+        let all = filteredSessions
         let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
 
         var childrenOf: [String: [SessionSummary]] = [:]
@@ -36,6 +46,31 @@ struct SessionExplorerView: View {
                 .frame(maxWidth: .infinity)
                 .padding(40)
         } else {
+            VStack(spacing: 0) {
+                // Search bar
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundStyle(gw.opacity(0.3))
+                    TextField(L("Ara…", "Search…"), text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(gw.opacity(0.75))
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(gw.opacity(0.3))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(gw.opacity(0.05), in: .rect(cornerRadius: 6))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(trees, id: \.root.id) { tree in
@@ -48,6 +83,7 @@ struct SessionExplorerView: View {
                 }
                 .padding(.bottom, 8)
             }
+            } // close outer VStack
         }
     }
 

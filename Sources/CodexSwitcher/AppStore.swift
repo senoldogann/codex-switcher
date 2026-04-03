@@ -28,11 +28,16 @@ final class AppStore: ObservableObject {
     @Published var isSessionActive: Bool = false  // live session indicator
 
     @Published var availableUpdate: UpdateChecker.Release? = nil
+    @Published var pendingProvider: AIProvider = .codex
 
     @Published var projectUsage: [ProjectUsage] = []
     @Published var sessionSummaries: [SessionSummary] = []
     @Published var hourlyActivity: [HourlyActivity] = []
     @Published var expensiveTurns: [ExpensiveTurn] = []
+
+    private var lastBudgetAlertDate: Date?
+    private var lastWeeklySummaryDate: Date?
+    private var claudeAuthPoller: Timer?
 
     func checkForUpdates() {
         Task {
@@ -142,6 +147,8 @@ final class AppStore: ObservableObject {
 
         let activeProfileId = activeProfile?.id
         let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
+            // Claude Code profiles use a different auth system — skip Codex rate limit API
+            guard profile.aiProvider == .codex else { return nil }
             // Aktif hesap için her zaman live ~/.codex/auth.json'u kullan (en güncel token)
             let dict: [String: Any]?
             if profile.id == activeProfileId,
@@ -259,6 +266,9 @@ final class AppStore: ObservableObject {
         costs = newCosts
         forecasts = newForecasts
 
+        checkBudget(costs: newCosts)
+        checkWeeklySummary(costs: newCosts)
+
         // Update pace history
         let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
         if totalTokens > 0 {
@@ -267,6 +277,53 @@ final class AppStore: ObservableObject {
             let cutoff = Date().addingTimeInterval(-24 * 3600)
             paceHistory.removeAll { $0.timestamp < cutoff }
         }
+    }
+
+    // MARK: - Budget Alert
+
+    private func checkBudget(costs: [UUID: Double]) {
+        let limit = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
+        guard limit > 0 else { return }
+        let total = costs.values.reduce(0, +)
+        guard total >= limit else { return }
+        let today = Calendar.current.startOfDay(for: Date())
+        if let last = lastBudgetAlertDate, Calendar.current.startOfDay(for: last) == today { return }
+        lastBudgetAlertDate = Date()
+        let spent = String(format: "%.2f", total)
+        let cap   = String(format: "%.2f", limit)
+        sendNotification(
+            title: L("Bütçe aşıldı 💸", "Budget exceeded 💸"),
+            body:  L("Bu hafta $\(spent) harcandı (limit: $\(cap))",
+                     "Spent $\(spent) this week (budget: $\(cap))")
+        )
+    }
+
+    // MARK: - Weekly Summary (Sunday evening)
+
+    private func checkWeeklySummary(costs: [UUID: Double]) {
+        let cal  = Calendar.current
+        let now  = Date()
+        let comps = cal.dateComponents([.weekday, .hour], from: now)
+        // Sunday = weekday 1 in Gregorian; send after 18:00
+        guard comps.weekday == 1, (comps.hour ?? 0) >= 18 else { return }
+        let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
+        if let last = lastWeeklySummaryDate, last > weekStart { return }
+        lastWeeklySummaryDate = now
+
+        let totalCost   = costs.values.reduce(0, +)
+        let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
+        let topProject  = projectUsage.first?.name ?? "—"
+
+        func fmt(_ n: Int) -> String {
+            n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000)
+          : n >= 1_000     ? String(format: "%.1fK", Double(n)/1_000)
+          : "\(n)"
+        }
+        sendNotification(
+            title: L("Haftalık Özet 📊", "Weekly Summary 📊"),
+            body:  L("\(fmt(totalTokens)) token · $\(String(format:"%.2f",totalCost)) · \(topProject)",
+                     "\(fmt(totalTokens)) tokens · $\(String(format:"%.2f",totalCost)) · top: \(topProject)")
+        )
     }
 
     func getTokenUsage(for profile: Profile) -> AccountTokenUsage? {
@@ -443,10 +500,25 @@ final class AppStore: ObservableObject {
         notifyProfileChanged()
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
-        restartCodexIfRunning()
+        restartAIIfRunning(for: candidate)
     }
 
-    // MARK: - Codex Restart
+    // MARK: - AI Restart
+
+    private func restartAIIfRunning(for profile: Profile) {
+        switch profile.aiProvider {
+        case .codex:      restartCodexIfRunning()
+        case .claudeCode: notifyClaudeSessionRestart()
+        }
+    }
+
+    /// Claude Code is a CLI — notify user to restart their session.
+    private func notifyClaudeSessionRestart() {
+        sendNotification(
+            title: L("Claude kimlik bilgileri güncellendi", "Claude credentials updated"),
+            body:  L("Aktif claude oturumlarını yeniden başlatın.", "Please restart any active claude sessions.")
+        )
+    }
 
     private func restartCodexIfRunning() {
         guard let codexApp = NSWorkspace.shared.runningApplications.first(where: {
@@ -580,19 +652,55 @@ final class AppStore: ObservableObject {
 
     func closeAddAccountWindow() { addAccountWindow?.close() }
 
-    func beginAddAccount() {
+    func beginAddAccount(provider: AIProvider = .codex) {
+        pendingProvider = provider
         isAddingAccount = true
         addingStep = .waitingLogin
-        openTerminalWithCodexLogin()
-        watchAuthFileForNewLogin()
 
-        // 120 saniye timeout — login tamamlanmazsa otomatik iptal
-        cancelLoginTimeout()
-        let timeout = DispatchWorkItem { [weak self] in
-            self?.loginTimedOut()
+        switch provider {
+        case .codex:
+            openTerminalWithCodexLogin()
+            watchAuthFileForNewLogin()
+        case .claudeCode:
+            openTerminalWithClaudeLogin()
+            let previousData = ClaudeCodeManager.readCredentialsData()
+            startClaudeKeychainPoller(previousData: previousData)
         }
+
+        cancelLoginTimeout()
+        let timeout = DispatchWorkItem { [weak self] in self?.loginTimedOut() }
         loginTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeout)
+    }
+
+    private func openTerminalWithClaudeLogin() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["claude", "auth", "login"]
+        task.standardInput = nil; task.standardOutput = nil; task.standardError = nil
+        try? task.run()
+    }
+
+    private func startClaudeKeychainPoller(previousData: Data?) {
+        claudeAuthPoller?.invalidate()
+        claudeAuthPoller = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard let newData = ClaudeCodeManager.readCredentialsData() else { return }
+            if newData != previousData {
+                self.claudeAuthPoller?.invalidate()
+                self.claudeAuthPoller = nil
+                self.claudeKeychainUpdated(data: newData)
+            }
+        }
+    }
+
+    private func claudeKeychainUpdated(data: Data) {
+        guard addingStep == .waitingLogin else { return }
+        guard let email = ClaudeCodeManager.parseEmail(from: data),
+              !email.isEmpty else { return }
+        pendingProfileEmail = email
+        cancelLoginTimeout()
+        addingStep = .confirmProfile
     }
 
     private func cancelLoginTimeout() {
@@ -609,7 +717,7 @@ final class AppStore: ObservableObject {
     }
 
     func confirmPendingProfile(alias: String) {
-        guard let newProfile = profileManager.captureCurrentAuth(alias: alias) else {
+        guard let newProfile = profileManager.captureCurrentAuth(alias: alias, provider: pendingProvider) else {
             cancelAddAccount()
             return
         }
@@ -636,6 +744,8 @@ final class AppStore: ObservableObject {
 
     func cancelAddAccount() {
         cancelLoginTimeout()
+        claudeAuthPoller?.invalidate()
+        claudeAuthPoller = nil
         isAddingAccount = false
         addingStep = .idle
         pendingProfileEmail = ""

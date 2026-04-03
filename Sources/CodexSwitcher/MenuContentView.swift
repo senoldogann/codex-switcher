@@ -292,6 +292,16 @@ struct MenuContentView: View {
                             .foregroundStyle(isActive ? gw : gw.opacity(0.6))
                             .lineLimit(1)
 
+                        // Provider badge (only for non-Codex)
+                        if profile.aiProvider != .codex {
+                            Text(profile.aiProvider.shortBadge)
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(.orange.opacity(0.12), in: .capsule)
+                        }
+
                         if isActive {
                             // Live indicator when session is active
                             if store.isSessionActive {
@@ -682,12 +692,47 @@ struct MenuContentView: View {
                     isDarkMode.toggle()
                 }
                 thinDivider
+                // Budget limit button
+                settingsBtn("dollarsign.circle", budgetLabel) {
+                    showBudgetAlert()
+                }
+                thinDivider
                 // Reset token statistics
                 settingsBtn("arrow.counterclockwise", L("Sıfırla", "Reset")) {
                     store.resetStatistics()
                 }
             }
             .frame(height: 36)
+        }
+    }
+
+    // MARK: - Budget
+
+    private var budgetLabel: String {
+        let limit = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
+        if limit <= 0 { return L("Bütçe", "Budget") }
+        let spent = store.costs.values.reduce(0, +)
+        return "$\(String(format: "%.0f", spent))/$\(String(format: "%.0f", limit))"
+    }
+
+    private func showBudgetAlert() {
+        let alert = NSAlert()
+        alert.messageText = L("Haftalık bütçe limiti", "Weekly budget limit (USD)")
+        alert.informativeText = L("0 girerek devre dışı bırakın.", "Enter 0 to disable.")
+        alert.addButton(withTitle: L("Kaydet", "Save"))
+        alert.addButton(withTitle: L("İptal", "Cancel"))
+
+        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        let current = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
+        tf.stringValue = current > 0 ? String(format: "%.2f", current) : ""
+        tf.placeholderString = "0.00"
+        tf.bezelStyle = .roundedBezel
+        alert.accessoryView = tf
+
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            let val = Double(tf.stringValue.replacingOccurrences(of: ",", with: ".")) ?? 0
+            UserDefaults.standard.set(max(0, val), forKey: "weeklyBudgetUSD")
         }
     }
 

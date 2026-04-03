@@ -1,27 +1,84 @@
 import Foundation
 
+// MARK: - AI Provider
+
+enum AIProvider: String, Codable, CaseIterable {
+    case codex      = "codex"
+    case claudeCode = "claudeCode"
+
+    var displayName: String {
+        switch self {
+        case .codex:      return "Codex"
+        case .claudeCode: return "Claude"
+        }
+    }
+
+    var shortBadge: String {
+        switch self {
+        case .codex:      return "CX"
+        case .claudeCode: return "CC"
+        }
+    }
+
+    /// OS process name used to find/kill the running app
+    var processName: String {
+        switch self {
+        case .codex:      return "Codex"
+        case .claudeCode: return "claude"
+        }
+    }
+
+    /// Login command run in background to trigger auth
+    var loginCommand: [String] {
+        switch self {
+        case .codex:      return ["codex", "login"]
+        case .claudeCode: return ["claude", "auth", "login"]
+        }
+    }
+}
+
+// MARK: - Profile
+
 struct Profile: Identifiable, Codable, Equatable {
     let id: UUID
     var alias: String
     var email: String
     var accountId: String
     var addedAt: Date
-    var activatedAt: Date?       // Bu hesap en son ne zaman aktif edildi
-    var lastKnownTurns: Int?     // Hesaptan çıkarken kaydedilen turn sayısı
+    var activatedAt: Date?
+    var lastKnownTurns: Int?
+    var aiProvider: AIProvider
 
-    var displayName: String {
-        alias.isEmpty ? email : alias
+    init(id: UUID = UUID(), alias: String, email: String, accountId: String,
+         addedAt: Date, activatedAt: Date? = nil, lastKnownTurns: Int? = nil,
+         aiProvider: AIProvider = .codex) {
+        self.id = id; self.alias = alias; self.email = email
+        self.accountId = accountId; self.addedAt = addedAt
+        self.activatedAt = activatedAt; self.lastKnownTurns = lastKnownTurns
+        self.aiProvider = aiProvider
     }
 
+    // Backward-compatible decoder: old profiles missing aiProvider default to .codex
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id            = try c.decode(UUID.self,   forKey: .id)
+        alias         = try c.decode(String.self, forKey: .alias)
+        email         = try c.decode(String.self, forKey: .email)
+        accountId     = try c.decode(String.self, forKey: .accountId)
+        addedAt       = try c.decode(Date.self,   forKey: .addedAt)
+        activatedAt   = try c.decodeIfPresent(Date.self,       forKey: .activatedAt)
+        lastKnownTurns = try c.decodeIfPresent(Int.self,       forKey: .lastKnownTurns)
+        aiProvider    = try c.decodeIfPresent(AIProvider.self, forKey: .aiProvider) ?? .codex
+    }
+
+    var displayName: String { alias.isEmpty ? email : alias }
+
     var shortEmail: String {
-        let parts = email.components(separatedBy: "@")
-        let local = parts.first ?? email
+        let local = email.components(separatedBy: "@").first ?? email
         return local.count > 14 ? String(local.prefix(14)) + "…" : local
     }
 
-    var initial: String {
-        String(displayName.prefix(1).uppercased())
-    }
+    var initial: String { String(displayName.prefix(1).uppercased()) }
 }
 
 struct AppConfig: Codable {
