@@ -36,13 +36,17 @@ final class SessionTokenParser: @unchecked Sendable {
         let parentId: String?
         let turns: [CachedTurn]
 
-        var totalTokens: Int { turns.reduce(0) { $0 + $1.tokens } }
+        var totalTokens: Int { turns.reduce(0) { $0 + $1.inputTokens + $1.outputTokens } }
 
         struct CachedTurn: Codable {
             let promptPreview: String
-            let tokens: Int
+            let inputTokens: Int
+            let outputTokens: Int
             let timestamp: Double      // timeIntervalSince1970
             let model: String
+
+            /// Total tokens for display/sorting
+            var tokens: Int { inputTokens + outputTokens }
         }
     }
 
@@ -59,8 +63,8 @@ final class SessionTokenParser: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         deltaCacheURL = cacheDir.appendingPathComponent("event-deltas-v2.json")
         modTimeCacheURL = cacheDir.appendingPathComponent("token-usage.json.mod")
-        sessionMetaCacheURL = cacheDir.appendingPathComponent("session-meta-v1.json")
-        sessionModTimeCacheURL = cacheDir.appendingPathComponent("session-meta.mod")
+        sessionMetaCacheURL = cacheDir.appendingPathComponent("session-meta-v2.json")
+        sessionModTimeCacheURL = cacheDir.appendingPathComponent("session-meta-v2.mod")
     }
 
     // MARK: - Public
@@ -411,18 +415,17 @@ final class SessionTokenParser: @unchecked Sendable {
             if (projectLastUsed[path] ?? .distantPast) < date {
                 projectLastUsed[path] = date
             }
-            // Cost: aggregate model usage from turns
+            // Cost: use actual input/output split from JSONL token_count events
             var modelMap: [String: ModelTokenUsage] = [:]
             for turn in meta.turns {
-                let half = turn.tokens / 2
                 modelMap[turn.model, default: ModelTokenUsage()] += ModelTokenUsage(
-                    inputTokens: half, cachedInputTokens: 0,
-                    outputTokens: turn.tokens - half, sessionCount: 0)
+                    inputTokens: turn.inputTokens, cachedInputTokens: 0,
+                    outputTokens: turn.outputTokens, sessionCount: 0)
             }
             let usage = AccountTokenUsage(
-                inputTokens: meta.turns.reduce(0) { $0 + $1.tokens / 2 },
+                inputTokens: meta.turns.reduce(0) { $0 + $1.inputTokens },
                 cachedInputTokens: 0,
-                outputTokens: meta.turns.reduce(0) { $0 + ($1.tokens - $1.tokens / 2) },
+                outputTokens: meta.turns.reduce(0) { $0 + $1.outputTokens },
                 reasoningTokens: 0, sessionCount: 0, modelUsage: modelMap)
             projectCosts[path, default: 0] += costCalc.cost(for: usage)
         }
@@ -656,11 +659,11 @@ final class SessionTokenParser: @unchecked Sendable {
                     dOutput = max(0, toInt(last["output_tokens"]))
                 }
 
-                let turnTokens = dInput + dOutput
-                if turnTokens > 0, !currentTurnPrompt.isEmpty {
+                if dInput + dOutput > 0, !currentTurnPrompt.isEmpty {
                     turns.append(SessionFileMeta.CachedTurn(
                         promptPreview: currentTurnPrompt,
-                        tokens: turnTokens,
+                        inputTokens: dInput,
+                        outputTokens: dOutput,
                         timestamp: ts > 0 ? ts : currentTurnTs,
                         model: currentTurnModel))
                     currentTurnPrompt = ""
