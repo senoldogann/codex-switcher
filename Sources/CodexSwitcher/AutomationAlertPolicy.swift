@@ -11,9 +11,9 @@ enum AutomationAlertPolicy {
         let title: String = {
             switch severity {
             case .critical:
-                return "Automation needs immediate attention"
+                return Str.automationCriticalTitle
             case .warning:
-                return "Automation needs attention"
+                return Str.automationWarningTitle
             }
         }()
 

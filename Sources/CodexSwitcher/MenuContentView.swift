@@ -108,7 +108,7 @@ struct MenuContentView: View {
             }
 
             Button {
-                store.switchToNext(reason: L("Manuel override", "Manual override"))
+                store.switchToNext(reason: Str.manualOverride)
             } label: {
                 Text(Str.switchAnyway)
                     .font(.system(size: 10, weight: .medium))
@@ -164,7 +164,7 @@ struct MenuContentView: View {
                         ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(spacing: 0) {
                                 if !store.switchTimeline.isEmpty {
-                                    sectionLabel(L("Otomasyon", "Automation"))
+                                    sectionLabel(Str.automation)
                                     ForEach(Array(store.switchTimeline.reversed().prefix(12))) { event in
                                         timelineRow(event)
                                         Divider().background(gw.opacity(0.05))
@@ -172,7 +172,7 @@ struct MenuContentView: View {
                                 }
 
                                 if !store.switchHistory.isEmpty {
-                                    sectionLabel(L("Geçişler", "Switches"))
+                                    sectionLabel(Str.switches)
                                     ForEach(store.switchHistory.reversed()) { event in
                                         historyRow(event)
                                         Divider().background(gw.opacity(0.05))
@@ -208,7 +208,7 @@ struct MenuContentView: View {
 
     private var analyticsRangeBar: some View {
         HStack(spacing: 8) {
-            Text(L("Aralık", "Range"))
+            Text(Str.range)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(gw.opacity(0.28))
 
@@ -239,17 +239,17 @@ struct MenuContentView: View {
     private var switchReliabilitySummary: some View {
         HStack(spacing: 10) {
             summaryPill(
-                label: L("Bekleyen", "Queued"),
+                label: Str.queued,
                 value: "\(store.switchReliability.pendingSwitchCount)",
                 tint: .orange
             )
             summaryPill(
-                label: L("Sessiz geçiş", "Seamless"),
+                label: Str.seamless,
                 value: "\(store.switchReliability.seamlessSuccessCount)",
                 tint: .green
             )
             summaryPill(
-                label: L("Fallback", "Fallback"),
+                label: Str.fallback,
                 value: "\(store.switchReliability.fallbackRestartCount)",
                 tint: .blue
             )
@@ -280,7 +280,7 @@ struct MenuContentView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
-                    Text(L("Automation confidence", "Automation confidence"))
+                    Text(Str.automationConfidence)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(gw.opacity(0.72))
                     Text(automationConfidenceLabel)
@@ -294,11 +294,11 @@ struct MenuContentView: View {
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
-                    metricCapsule(label: L("Stale", "Stale"), value: "\(store.automationConfidence.staleProfileCount)")
-                    metricCapsule(label: L("Fallback", "Fallback"), value: "\(store.automationConfidence.fallbackRestartCount)")
-                    metricCapsule(label: L("Seamless", "Seamless"), value: "\(store.automationConfidence.seamlessSuccessCount)")
+                    metricCapsule(label: Str.stale, value: "\(store.automationConfidence.staleProfileCount)")
+                    metricCapsule(label: Str.fallback, value: "\(store.automationConfidence.fallbackRestartCount)")
+                    metricCapsule(label: Str.seamless, value: "\(store.automationConfidence.seamlessSuccessCount)")
                     if let lastVerifiedSwitchAt = store.automationConfidence.lastVerifiedSwitchAt {
-                        metricCapsule(label: L("Last verified", "Last verified"), value: relativeShort(lastVerifiedSwitchAt))
+                        metricCapsule(label: Str.lastVerified, value: relativeShort(lastVerifiedSwitchAt))
                     }
                 }
             }
@@ -314,7 +314,7 @@ struct MenuContentView: View {
             if !store.accountReliability.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text(L("Accounts needing attention", "Accounts needing attention"))
+                        Text(Str.accountsNeedingAttention)
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(gw.opacity(0.28))
                             .textCase(.uppercase)
@@ -387,10 +387,10 @@ struct MenuContentView: View {
 
     private func switchOutcomeLabel(_ outcome: SeamlessSwitchResult.Outcome) -> String {
         switch outcome {
-        case .deferred: return L("Ertelendi", "Deferred")
+        case .deferred: return Str.deferred
         case .seamlessSuccess: return L("Doğrulandı", "Verified")
-        case .fallbackRestart: return L("Restart fallback", "Restart fallback")
-        case .inconclusive: return L("Belirsiz", "Inconclusive")
+        case .fallbackRestart: return Str.fallbackRestart
+        case .inconclusive: return Str.inconclusive
         }
     }
 
@@ -804,13 +804,13 @@ struct MenuContentView: View {
 
                 HStack(spacing: 8) {
                     if let reason = event.reason, !reason.isEmpty {
-                        metricCapsule(label: L("Sebep", "Reason"), value: reason)
+                        metricCapsule(label: Str.reason, value: reason)
                     }
                     if let wait = event.waitDurationSeconds {
-                        metricCapsule(label: L("Bekleme", "Wait"), value: "\(wait)s")
+                        metricCapsule(label: Str.wait, value: "\(wait)s")
                     }
                     if let verification = event.verificationDurationSeconds {
-                        metricCapsule(label: L("Doğrulama", "Verify"), value: "\(verification)s")
+                        metricCapsule(label: Str.verify, value: "\(verification)s")
                     }
                 }
             }
@@ -869,9 +869,9 @@ struct MenuContentView: View {
 
     private var automationConfidenceLabel: String {
         switch store.automationConfidence.status {
-        case .healthy: return L("Healthy", "Healthy")
-        case .warning: return L("Attention", "Attention")
-        case .critical: return L("Critical", "Critical")
+        case .healthy: return Str.healthy
+        case .warning: return Str.attention
+        case .critical: return Str.critical
         }
     }
 
@@ -894,9 +894,9 @@ struct MenuContentView: View {
         case .queued: return L("Kuyrukta", "Queued")
         case .ready: return L("Hazır", "Ready")
         case .verifying: return L("Doğrulanıyor", "Verifying")
-        case .seamlessSuccess: return L("Sessiz geçiş", "Seamless")
-        case .fallbackRestart: return L("Fallback restart", "Fallback restart")
-        case .inconclusive: return L("Belirsiz", "Inconclusive")
+        case .seamlessSuccess: return Str.seamless
+        case .fallbackRestart: return Str.fallbackRestart
+        case .inconclusive: return Str.inconclusive
         }
     }
 
@@ -1118,6 +1118,7 @@ struct MenuContentView: View {
         if alert.runModal() == .alertFirstButtonReturn {
             let val = Double(tf.stringValue.replacingOccurrences(of: ",", with: ".")) ?? 0
             UserDefaults.standard.set(max(0, val), forKey: "weeklyBudgetUSD")
+            store.refreshTokenUsage()
         }
     }
 
@@ -1194,11 +1195,11 @@ struct MenuContentView: View {
 
     private var updateStateLabel: String {
         switch store.updateStatus.state {
-        case .idle: return L("Hazır", "Idle")
-        case .checking: return L("Kontrol", "Checking")
+        case .idle: return Str.idle
+        case .checking: return Str.checking
         case .upToDate: return L("Güncel", "Up to date")
-        case .updateAvailable: return L("Update var", "Update available")
-        case .failed: return L("Hata", "Failed")
+        case .updateAvailable: return Str.updateAvailableShort
+        case .failed: return Str.failed
         }
     }
 
@@ -1221,12 +1222,12 @@ struct MenuContentView: View {
 
     private func healthLine(for health: RateLimitHealthStatus, profileId: UUID) -> String? {
         if store.staleProfileIds.contains(profileId) {
-            var parts: [String] = [L("Stale", "Stale")]
+            var parts: [String] = [Str.stale]
             if let reason = health.staleReason?.summary {
                 parts.append(reason)
             }
             if let lastOk = health.lastSuccessfulFetchAt {
-                parts.append("\(L("son ok", "last ok")) \(compactTime(lastOk))")
+                parts.append("\(Str.lastOk) \(compactTime(lastOk))")
             }
             return parts.joined(separator: " · ")
         }
@@ -1237,7 +1238,7 @@ struct MenuContentView: View {
                 parts.append("HTTP \(code)")
             }
             if let lastOk = health.lastSuccessfulFetchAt {
-                parts.append("\(L("son ok", "last ok")) \(compactTime(lastOk))")
+                parts.append("\(Str.lastOk) \(compactTime(lastOk))")
             }
             return parts.joined(separator: " · ")
         }

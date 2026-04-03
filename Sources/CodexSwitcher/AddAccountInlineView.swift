@@ -23,7 +23,7 @@ struct AddAccountInlineView: View {
             case .done:          doneView
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.addingStep == .done ? .center : .top)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.addingStep)
@@ -218,25 +218,31 @@ struct AddAccountInlineView: View {
     // MARK: - Done
 
     private var doneView: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(Color.green.opacity(0.15))
-                    .frame(width: 52, height: 52)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                    )
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Color.green.opacity(0.8))
+        VStack {
+            Spacer(minLength: 0)
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.15))
+                        .frame(width: 52, height: 52)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                        )
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(Color.green.opacity(0.8))
+                }
+
+                Text(Str.added)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(gw.opacity(0.9))
+
+                glassButton(Str.close, icon: "xmark") {
+                    store.dismissAddAccountFlow()
+                }
             }
-
-            Text(Str.added)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(gw.opacity(0.9))
-
-            glassButton(Str.close, icon: "xmark") { store.closeAddAccountWindow() }
+            Spacer(minLength: 0)
         }
     }
 

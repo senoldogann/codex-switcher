@@ -145,12 +145,16 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 - **Sidebar proportion polish** — Increased popover width and tightened the rail so account cards keep a cleaner, less cramped layout
 - **Layout tightening** — Reduced wasted top and bottom space in the main list, add-account flow, and footer strip
 - **Add Account fix** — `Start` now launches `codex login` through a login shell more reliably and shows visible failure feedback
+- **Single browser login flow** — Add Account now avoids opening the Codex sign-in browser twice and lets the CLI own the single auth window
+- **Add Account completion polish** — The success state is vertically centered and the inline `Close` button now dismisses the flow correctly
 - **Projects CSV fix** — CSV export now opens a real save flow and writes stable escaped output
+- **Immediate budget limit alerts** — Saving a weekly USD budget now rechecks usage immediately so over-budget warnings fire without waiting for a later refresh
 - **Safe switch boundary** — Auto-switches now queue during active work and execute after the session goes idle
 - **Seamless switch verification** — The app now prefers restart-free switching and only falls back to restarting Codex if post-switch limit behavior still indicates failure
 - **Switch timeline** — History now records queued, ready, verifying, seamless, fallback, and inconclusive events with wait and verification timing
 - **Automation confidence** — Added health summary and per-account attention strip for stale auth, fetch instability, and fallback pressure
 - **Automation alerts** — The app now emits deduplicated warnings when automation health degrades or a pending switch gets stuck
+- **TR/EN localization sweep** — Recent automation, reliability, and health labels now render consistently in Turkish and English
 - **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
 - **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
 

@@ -372,12 +372,15 @@ final class AppStore: ObservableObject {
 
     private func checkBudget(costs: [UUID: Double]) {
         let limit = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
-        guard limit > 0 else { return }
         let total = costs.values.reduce(0, +)
-        guard total >= limit else { return }
-        let today = Calendar.current.startOfDay(for: Date())
-        if let last = lastBudgetAlertDate, Calendar.current.startOfDay(for: last) == today { return }
-        lastBudgetAlertDate = Date()
+        let now = Date()
+        guard BudgetAlertPolicy.shouldAlert(
+            totalCost: total,
+            budgetLimit: limit,
+            lastAlertDate: lastBudgetAlertDate,
+            now: now
+        ) else { return }
+        lastBudgetAlertDate = now
         let spent = String(format: "%.2f", total)
         let cap   = String(format: "%.2f", limit)
         sendNotification(
@@ -753,6 +756,20 @@ final class AppStore: ObservableObject {
 
     func closeAddAccountWindow() { addAccountWindow?.close() }
 
+    func dismissAddAccountFlow(closeWindow: Bool = false) {
+        cancelLoginTimeout()
+        stopCodexLoginProcess(suppressFailureFeedback: true)
+        isAddingAccount = false
+        addingStep = .idle
+        addAccountErrorMessage = nil
+        pendingProfileEmail = ""
+        aliasText = ""
+        stopAuthWatcher()
+        if closeWindow {
+            closeAddAccountWindow()
+        }
+    }
+
     func beginAddAccount() {
         addAccountErrorMessage = nil
         isAddingAccount = true
@@ -1081,11 +1098,11 @@ final class AppStore: ObservableObject {
         loginOutputBuffer += chunk
 
         guard !didOpenLoginBrowser,
-              let url = CodexLoginOutputParser.authorizationURL(in: loginOutputBuffer) else { return }
+              CodexLoginOutputParser.authorizationURL(in: loginOutputBuffer) != nil else { return }
 
+        // The Codex CLI already opens the browser window. We only mark that we saw
+        // a valid login URL so the app does not trigger duplicate browser opens.
         didOpenLoginBrowser = true
-        NSApp.activate(ignoringOtherApps: true)
-        NSWorkspace.shared.open(url)
     }
 
     private func handleCodexLoginTermination(status: Int32) {

@@ -41,12 +41,39 @@ enum Str {
     static var renameTitle:  String { L("Hesap Adını Değiştir", "Rename Account") }
     static var allExhausted: String { L("Tüm hesaplar doldu!", "All accounts exhausted!") }
     static var switchAnyway: String { L("Yine de geç", "Switch anyway") }
+    static var manualOverride: String { L("Manuel zorla geçiş", "Manual override") }
     static var lastKnown:    String { L("son",                 "last") }
     static var unknownUsage: String { L("kullanım bilinmiyor", "usage unknown") }
     static var resets:       String { L("Sıfırlanma",         "Resets") }
     // History
     static var history:      String { L("Geçmiş",             "History") }
     static var noHistory:    String { L("Henüz geçiş yok",    "No switches yet") }
+    static var automation:   String { L("Otomasyon",          "Automation") }
+    static var switches:     String { L("Geçişler",           "Switches") }
+    static var range:        String { L("Aralık",             "Range") }
+    static var queued:       String { L("Bekleyen",           "Queued") }
+    static var seamless:     String { L("Sessiz geçiş",       "Seamless") }
+    static var fallback:     String { L("Fallback",           "Fallback") }
+    static var automationConfidence: String { L("Otomasyon güveni", "Automation confidence") }
+    static var accountsNeedingAttention: String { L("İlgi gereken hesaplar", "Accounts needing attention") }
+    static var stale:        String { L("Auth sorunu",        "Stale") }
+    static var lastVerified: String { L("Son doğrulama",      "Last verified") }
+    static var healthy:      String { L("Sağlıklı",           "Healthy") }
+    static var attention:    String { L("Dikkat",             "Attention") }
+    static var critical:     String { L("Kritik",             "Critical") }
+    static var fallbackRestart: String { L("Yeniden başlatma fallback", "Fallback restart") }
+    static var inconclusive: String { L("Belirsiz", "Inconclusive") }
+    static var deferred:     String { L("Ertelendi", "Deferred") }
+    static var reason:       String { L("Sebep",              "Reason") }
+    static var wait:         String { L("Bekleme",            "Wait") }
+    static var verify:       String { L("Doğrulama",          "Verify") }
+    static var lastOk:       String { L("son başarılı",       "last ok") }
+    static var idle:         String { L("Hazır",              "Idle") }
+    static var checking:     String { L("Kontrol",            "Checking") }
+    static var updateAvailableShort: String { L("Güncelleme var", "Update available") }
+    static var failed:       String { L("Hata",               "Failed") }
+    static var automationWarningTitle: String { L("Otomasyon dikkat istiyor", "Automation needs attention") }
+    static var automationCriticalTitle: String { L("Otomasyon acil dikkat istiyor", "Automation needs immediate attention") }
     // Settings bar
     static var dark:         String { L("Koyu",               "Dark") }
     static var light:        String { L("Açık",               "Light") }

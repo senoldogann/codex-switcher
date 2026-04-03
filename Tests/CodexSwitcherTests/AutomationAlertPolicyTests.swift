@@ -32,7 +32,7 @@ struct AutomationAlertPolicyTests {
         )
 
         #expect(alert?.severity == .warning)
-        #expect(alert?.title.contains("attention") == true)
+        #expect(alert?.title == Str.automationWarningTitle)
     }
 
     @Test
