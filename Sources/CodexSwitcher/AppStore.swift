@@ -674,11 +674,35 @@ final class AppStore: ObservableObject {
     }
 
     private func openTerminalWithClaudeLogin() {
+        // claude auth login is interactive — must run inside a visible Terminal window
+        let claudePath = (try? Process.run(
+            URL(fileURLWithPath: "/usr/bin/which"),
+            arguments: ["claude"]
+        ).standardOutput.map { _ in "" }) ?? ""
+        let cmd = "'\(findCLIPath("claude"))' auth login"
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "\(cmd)"
+        end tell
+        """
+        var err: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&err)
+        _ = claudePath  // suppress warning
+    }
+
+    private func findCLIPath(_ name: String) -> String {
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["claude", "auth", "login"]
-        task.standardInput = nil; task.standardOutput = nil; task.standardError = nil
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        task.arguments = [name]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = nil
         try? task.run()
+        task.waitUntilExit()
+        let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "/usr/local/bin/\(name)" : raw
     }
 
     private func startClaudeKeychainPoller(previousData: Data?) {
