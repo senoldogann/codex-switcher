@@ -1,5 +1,7 @@
 import SwiftUI
 import Charts
+import AppKit
+import UniformTypeIdentifiers
 
 struct AnalyticsWindowView: View {
     @EnvironmentObject private var store: AppStore
@@ -389,13 +391,24 @@ struct AnalyticsWindowView: View {
 
     private var usageAuditSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(
-                title: L("Kullanım auditi", "Usage audit"),
-                subtitle: L(
-                    "Provider limit düşüşleri ile local usage kayıtlarının karşılaştırması",
-                    "Comparison of provider limit drops against local usage records"
+            HStack(alignment: .top) {
+                sectionHeader(
+                    title: L("Kullanım auditi", "Usage audit"),
+                    subtitle: L(
+                        "Provider limit düşüşleri ile local usage kayıtlarının karşılaştırması",
+                        "Comparison of provider limit drops against local usage records"
+                    )
                 )
-            )
+                Spacer()
+                HStack(spacing: 10) {
+                    exportButton(title: "CSV", type: .commaSeparatedText) {
+                        AnalyticsAuditExporter.buildCSV(for: snapshot.usageAuditEntries)
+                    }
+                    exportButton(title: "JSON", type: .json) {
+                        try AnalyticsAuditExporter.buildJSON(for: snapshot)
+                    }
+                }
+            }
 
             if snapshot.usageAuditEntries.isEmpty {
                 Text(L("Açıklanamayan limit düşüşü saptanmadı", "No unattributed limit drain detected"))
@@ -653,6 +666,36 @@ struct AnalyticsWindowView: View {
             Text(value)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(gw.opacity(0.56))
+        }
+    }
+
+    private func exportButton(title: String, type: UTType, content: @escaping () throws -> String) -> some View {
+        Button {
+            exportAudit(type: type, content: content)
+        } label: {
+            Label(title, systemImage: "square.and.arrow.up")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(gw.opacity(0.52))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func exportAudit(type: UTType, content: @escaping () throws -> String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = type == .json ? "codex-audit.json" : "codex-audit.csv"
+        panel.allowedContentTypes = [type]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let output = try content()
+            try output.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSSound.beep()
         }
     }
 

@@ -152,6 +152,12 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.1.3
+- **Audit export** — Added direct `CSV` and `JSON` export for trust/audit data from the analytics window
+- **Provider delta evidence** — Export payload now captures audit summary, full drain event rows, and timeline points for offline inspection
+- **Idle drain forensics** — Idle-window suspicious drops can now be shared and reviewed outside the app instead of staying only in the UI
+- **Audit exporter tests** — Added regression coverage for CSV column layout and JSON audit payload structure
+
 ### v2.1.2
 - **Trust-first analytics** — Per-account confidence wording now reflects fetch health instead of implying provider correctness
 - **Usage audit layer** — Consecutive rate-limit snapshots are compared against local usage records to flag explained, weak, and unattributed drain events
