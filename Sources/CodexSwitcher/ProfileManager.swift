@@ -153,9 +153,16 @@ final class ProfileManager: @unchecked Sendable {
     }
 
     func captureClaudeCodeAuth(alias: String) -> Profile? {
-        guard let data = ClaudeCodeManager.readCredentialsData(),
-              let email = ClaudeCodeManager.parseEmail(from: data),
-              let accountId = ClaudeCodeManager.parseAccountId(from: data) else { return nil }
+        guard let data = ClaudeCodeManager.readCredentialsData() else { return nil }
+
+        // Claude Code uses opaque tokens — email may not be in the token.
+        // Fall back to display label or a generic string.
+        let email = ClaudeCodeManager.parseEmail(from: data)
+            ?? ClaudeCodeManager.parseDisplayLabel(from: data)
+            ?? "Claude Code"
+
+        // Account ID: orgUuid > token prefix (stable enough for dedup)
+        let accountId = ClaudeCodeManager.parseAccountId(from: data) ?? UUID().uuidString
 
         let profile = Profile(id: UUID(), alias: alias, email: email,
                               accountId: accountId, addedAt: Date(), aiProvider: .claudeCode)
