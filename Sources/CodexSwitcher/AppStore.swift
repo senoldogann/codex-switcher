@@ -408,7 +408,12 @@ final class AppStore: ObservableObject {
     /// Rate limit verisine göre en iyi hesabı seçer.
     /// Auto modda tüm hesaplar tükenirse nil döner → allExhausted tetiklenir.
     private func smartNextProfile(auto: Bool) -> Profile? {
-        let candidates = profiles.filter { $0.id != activeProfile?.id }
+        let activeProvider = activeProfile?.aiProvider ?? .codex
+        // Only switch between profiles of the same AI provider.
+        // A Codex rate-limit trigger must not land on a Claude Code account and vice versa.
+        let candidates = profiles.filter {
+            $0.id != activeProfile?.id && $0.aiProvider == activeProvider
+        }
         guard !candidates.isEmpty else { return nil }
 
         if auto {
@@ -475,8 +480,10 @@ final class AppStore: ObservableObject {
             case .verified:
                 finalizeActivation(candidate, reason: reason)
             case .failed:
-                // One retry: re-read file (in case of race with external writer)
-                let retryResult = profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
+                // One retry: re-read credential source (in case of race with external writer)
+                let retryResult = candidate.aiProvider == .claudeCode
+                    ? profileManager.verifyClaudeCodeAccount(expectedAccountId: candidate.accountId)
+                    : profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
                 switch retryResult {
                 case .verified:
                     finalizeActivation(candidate, reason: reason)

@@ -72,12 +72,17 @@ struct RateLimitForecaster {
             return RateLimitForecast(riskLevel: .safe)
         }
 
-        // Determine remaining percentage (use 5-hour window as primary)
+        // Determine remaining percentage (use 5-hour window as primary for risk level).
+        // ETA calculation uses weekly data only — the 7-day JSONL tokenUsage only aligns
+        // with the weekly window; using it against the 5-hour window produces garbage ETAs.
         let remainingPercent: Double
+        let usingWeeklyForETA: Bool
         if let fiveHour = rl.fiveHourRemainingPercent {
             remainingPercent = Double(fiveHour)
+            usingWeeklyForETA = false
         } else if let weekly = rl.weeklyRemainingPercent {
             remainingPercent = Double(weekly)
+            usingWeeklyForETA = true
         } else {
             return RateLimitForecast(riskLevel: .safe)
         }
@@ -101,15 +106,16 @@ struct RateLimitForecaster {
             return RateLimitForecast(riskLevel: riskLevel)
         }
 
-        // Estimate tokens remaining
-        guard let usage = tokenUsage else {
+        // ETA only makes sense when tokenUsage (7-day JSONL) aligns with the weekly window.
+        // The 5-hour window uses a different budget, so mixing the two produces wrong ETAs.
+        guard usingWeeklyForETA, let usage = tokenUsage else {
             return RateLimitForecast(riskLevel: riskLevel, pacePerHour: pace)
         }
 
-        // Estimate total token budget from remaining %
+        // Estimate total token budget from weekly remaining %
         let totalUsed = Double(usage.totalTokens)
         let remainingFraction = remainingPercent / 100.0
-        guard remainingFraction < 1.0 else {
+        guard remainingFraction < 1.0, totalUsed > 0 else {
             return RateLimitForecast(riskLevel: riskLevel, pacePerHour: pace)
         }
 
