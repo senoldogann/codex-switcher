@@ -107,6 +107,55 @@ struct DailyUsage: Identifiable {
     var id: TimeInterval { dayStart.timeIntervalSince1970 }
 }
 
+// MARK: - Codex Insights
+
+struct ProjectUsage: Identifiable {
+    let id: String          // cwd path as stable key
+    let name: String        // last path component
+    let path: String
+    let tokens: Int
+    let cost: Double
+    let sessionCount: Int
+    let lastUsed: Date
+}
+
+struct SessionSummary: Identifiable {
+    let id: String          // session UUID
+    let projectName: String
+    let projectPath: String
+    let firstPrompt: String
+    let tokens: Int
+    let timestamp: Date
+    let depth: Int
+    let agentRole: String
+    let parentId: String?   // nil = root session
+}
+
+struct HourlyActivity: Identifiable {
+    let hour: Int           // 0–23
+    let dayOfWeek: Int      // 0=Mon … 6=Sun
+    let tokens: Int
+    var id: String { "\(dayOfWeek)-\(hour)" }
+}
+
+struct ExpensiveTurn: Identifiable {
+    let id: String
+    let projectName: String
+    let promptPreview: String
+    let tokens: Int
+    let timestamp: Date
+    let model: String
+}
+
+struct CodexInsights {
+    let projects: [ProjectUsage]
+    let sessions: [SessionSummary]
+    let hourlyActivity: [HourlyActivity]
+    let expensiveTurns: [ExpensiveTurn]
+
+    static let empty = CodexInsights(projects: [], sessions: [], hourlyActivity: [], expensiveTurns: [])
+}
+
 // MARK: - Session Event
 
 struct SessionEvent: Codable {

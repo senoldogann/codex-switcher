@@ -9,7 +9,7 @@ struct MenuContentView: View {
     @State private var screen: NavScreen = .main
     @State private var historyTab: HistoryTab = .list
 
-    enum HistoryTab { case list, chart }
+    enum HistoryTab { case list, chart, projects, sessions, heatmap, expensive }
 
     @AppStorage("emailsBlurred") private var emailsBlurred: Bool = false
     @AppStorage("isDarkMode")    private var isDarkMode: Bool = true
@@ -131,43 +131,83 @@ struct MenuContentView: View {
 
     private var historyContent: some View {
         VStack(spacing: 0) {
-            // History / Chart tab toggle
-            HStack(spacing: 0) {
-                tabBtn(icon: "list.bullet", label: L("Geçmiş", "History"), selected: historyTab == .list) {
-                    historyTab = .list
-                }
-                Divider().frame(height: 14).background(gw.opacity(0.08))
-                tabBtn(icon: "chart.line.uptrend.xyaxis", label: L("Grafik", "Chart"), selected: historyTab == .chart) {
-                    historyTab = .chart
+            // Tab bar — 6 tabs, icon only to fit
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    iconTab("list.bullet",                   L("Geçmiş","History"),   historyTab == .list)      { historyTab = .list }
+                    tabDivider
+                    iconTab("chart.line.uptrend.xyaxis",     L("Grafik","Chart"),     historyTab == .chart)     { historyTab = .chart }
+                    tabDivider
+                    iconTab("folder.fill",                   L("Projeler","Projects"),historyTab == .projects)  { historyTab = .projects }
+                    tabDivider
+                    iconTab("bubble.left.and.bubble.right",  L("Oturumlar","Sess."),  historyTab == .sessions)  { historyTab = .sessions }
+                    tabDivider
+                    iconTab("square.grid.2x2",               L("Isı","Heatmap"),      historyTab == .heatmap)   { historyTab = .heatmap }
+                    tabDivider
+                    iconTab("flame.fill",                    L("Pahalı","Top $"),     historyTab == .expensive) { historyTab = .expensive }
                 }
             }
-            .frame(height: 32)
+            .frame(height: 36)
             .padding(.horizontal, 14)
 
             Divider().background(gw.opacity(0.06))
 
-            if historyTab == .chart {
-                ScrollView(.vertical, showsIndicators: false) {
-                    UsageChartView().environmentObject(store)
-                }
-                .frame(maxHeight: 420)
-            } else if store.switchHistory.isEmpty {
-                Text(Str.noHistory)
-                    .font(.system(size: 12))
-                    .foregroundStyle(gw.opacity(0.35))
-                    .padding(40)
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(store.switchHistory.reversed()) { event in
-                            historyRow(event)
-                            Divider().background(gw.opacity(0.05))
+            Group {
+                switch historyTab {
+                case .list:
+                    if store.switchHistory.isEmpty {
+                        Text(Str.noHistory)
+                            .font(.system(size: 12))
+                            .foregroundStyle(gw.opacity(0.35))
+                            .padding(40)
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            LazyVStack(spacing: 0) {
+                                ForEach(store.switchHistory.reversed()) { event in
+                                    historyRow(event)
+                                    Divider().background(gw.opacity(0.05))
+                                }
+                            }
                         }
                     }
+                case .chart:
+                    ScrollView(.vertical, showsIndicators: false) {
+                        UsageChartView().environmentObject(store)
+                    }
+                case .projects:
+                    ProjectBreakdownView().environmentObject(store)
+                case .sessions:
+                    SessionExplorerView().environmentObject(store)
+                case .heatmap:
+                    ScrollView(.vertical, showsIndicators: false) {
+                        HeatmapView().environmentObject(store)
+                    }
+                case .expensive:
+                    ExpensivePromptsView().environmentObject(store)
                 }
-                .frame(maxHeight: 420)
             }
+            .frame(maxHeight: 420)
         }
+    }
+
+    private var tabDivider: some View {
+        Divider().frame(height: 14).background(gw.opacity(0.08))
+    }
+
+    private func iconTab(_ icon: String, _ label: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
+                Text(label)
+                    .font(.system(size: 8, weight: selected ? .semibold : .regular))
+            }
+            .frame(minWidth: 44)
+            .foregroundStyle(selected ? gw.opacity(0.8) : gw.opacity(0.32))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
     }
 
     private func tabBtn(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {

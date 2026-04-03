@@ -29,6 +29,11 @@ final class AppStore: ObservableObject {
 
     @Published var availableUpdate: UpdateChecker.Release? = nil
 
+    @Published var projectUsage: [ProjectUsage] = []
+    @Published var sessionSummaries: [SessionSummary] = []
+    @Published var hourlyActivity: [HourlyActivity] = []
+    @Published var expensiveTurns: [ExpensiveTurn] = []
+
     func checkForUpdates() {
         Task {
             let release = await UpdateChecker.fetchIfNewer()
@@ -217,13 +222,18 @@ final class AppStore: ObservableObject {
         let parser   = self.tokenParser
         let activeProfileId = self.activeProfile?.id
         DispatchQueue.global(qos: .utility).async {
-            let result = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
-            let daily  = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId)
+            let result   = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
+            let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId)
+            let insights = parser.calculateInsights()
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 guard self.profiles.count == profiles.count else { return }
-                self.tokenUsage = result
-                self.dailyUsage = daily
+                self.tokenUsage       = result
+                self.dailyUsage       = daily
+                self.projectUsage     = insights.projects
+                self.sessionSummaries = insights.sessions
+                self.hourlyActivity   = insights.hourlyActivity
+                self.expensiveTurns   = insights.expensiveTurns
                 self.updateCostsAndForecasts(profiles: profiles)
             }
         }

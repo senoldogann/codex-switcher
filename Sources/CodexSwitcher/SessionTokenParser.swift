@@ -21,6 +21,30 @@ final class SessionTokenParser: @unchecked Sendable {
     private let cacheDir: URL
     private let deltaCacheURL: URL
     private let modTimeCacheURL: URL
+    private let sessionMetaCacheURL: URL
+    private let sessionModTimeCacheURL: URL
+
+    // MARK: - Internal session meta cache types
+
+    fileprivate struct SessionFileMeta: Codable {
+        let sessionId: String
+        let cwd: String
+        let firstPrompt: String
+        let startTime: Double          // timeIntervalSince1970
+        let depth: Int
+        let agentRole: String
+        let parentId: String?
+        let turns: [CachedTurn]
+
+        var totalTokens: Int { turns.reduce(0) { $0 + $1.tokens } }
+
+        struct CachedTurn: Codable {
+            let promptPreview: String
+            let tokens: Int
+            let timestamp: Double      // timeIntervalSince1970
+            let model: String
+        }
+    }
 
     init() {
         sessionsDir = FileManager.default.homeDirectoryForCurrentUser
@@ -35,6 +59,8 @@ final class SessionTokenParser: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         deltaCacheURL = cacheDir.appendingPathComponent("event-deltas-v2.json")
         modTimeCacheURL = cacheDir.appendingPathComponent("token-usage.json.mod")
+        sessionMetaCacheURL = cacheDir.appendingPathComponent("session-meta-v1.json")
+        sessionModTimeCacheURL = cacheDir.appendingPathComponent("session-meta.mod")
     }
 
     // MARK: - Public
@@ -353,6 +379,330 @@ final class SessionTokenParser: @unchecked Sendable {
         let dict = times.mapValues { $0.timeIntervalSince1970 }
         guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
         try? data.write(to: modTimeCacheURL, options: .atomic)
+    }
+
+    // MARK: - Insights (Projects / Sessions / Heatmap / Expensive Turns)
+
+    func calculateInsights() -> CodexInsights {
+        let metaCache = refreshSessionMetaCache()
+        guard !metaCache.isEmpty else { return .empty }
+
+        let calendar = Calendar.current
+        let allMeta = metaCache.values
+
+        // ── 1. Projects ──────────────────────────────────────────────────
+        var projectTokens:   [String: Int]    = [:]
+        var projectCosts:    [String: Double]  = [:]
+        var projectSessions: [String: Int]     = [:]
+        var projectLastUsed: [String: Date]    = [:]
+        var projectName:     [String: String]  = [:]
+
+        let costCalc = CostCalculator()
+
+        for meta in allMeta {
+            let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
+            let name = path == "unknown" ? "Unknown"
+                     : (URL(fileURLWithPath: path).lastPathComponent)
+            let date = Date(timeIntervalSince1970: meta.startTime)
+
+            projectName[path] = name
+            projectTokens[path, default: 0]   += meta.totalTokens
+            projectSessions[path, default: 0]  += 1
+            if (projectLastUsed[path] ?? .distantPast) < date {
+                projectLastUsed[path] = date
+            }
+            // Cost: aggregate model usage from turns
+            var modelMap: [String: ModelTokenUsage] = [:]
+            for turn in meta.turns {
+                let half = turn.tokens / 2
+                modelMap[turn.model, default: ModelTokenUsage()] += ModelTokenUsage(
+                    inputTokens: half, cachedInputTokens: 0,
+                    outputTokens: turn.tokens - half, sessionCount: 0)
+            }
+            let usage = AccountTokenUsage(
+                inputTokens: meta.turns.reduce(0) { $0 + $1.tokens / 2 },
+                cachedInputTokens: 0,
+                outputTokens: meta.turns.reduce(0) { $0 + ($1.tokens - $1.tokens / 2) },
+                reasoningTokens: 0, sessionCount: 0, modelUsage: modelMap)
+            projectCosts[path, default: 0] += costCalc.cost(for: usage)
+        }
+
+        let projects: [ProjectUsage] = projectTokens.keys
+            .map { path in
+                ProjectUsage(
+                    id: path,
+                    name: projectName[path] ?? path,
+                    path: path,
+                    tokens: projectTokens[path] ?? 0,
+                    cost: projectCosts[path] ?? 0,
+                    sessionCount: projectSessions[path] ?? 0,
+                    lastUsed: projectLastUsed[path] ?? .distantPast)
+            }
+            .sorted { $0.tokens > $1.tokens }
+
+        // ── 2. Sessions (sorted newest first) ───────────────────────────
+        let sessions: [SessionSummary] = metaCache.values
+            .map { meta -> SessionSummary in
+                let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
+                let name = path == "unknown" ? "Unknown"
+                         : URL(fileURLWithPath: path).lastPathComponent
+                return SessionSummary(
+                    id: meta.sessionId.isEmpty ? UUID().uuidString : meta.sessionId,
+                    projectName: name,
+                    projectPath: path,
+                    firstPrompt: meta.firstPrompt,
+                    tokens: meta.totalTokens,
+                    timestamp: Date(timeIntervalSince1970: meta.startTime),
+                    depth: meta.depth,
+                    agentRole: meta.agentRole,
+                    parentId: meta.parentId)
+            }
+            .sorted { $0.timestamp > $1.timestamp }
+
+        // ── 3. Hourly activity (last 30 days, grouped by dow × hour) ────
+        let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
+        var hourlyMap: [String: Int] = [:]    // "dow-hour" → tokens
+
+        for meta in allMeta {
+            let date = Date(timeIntervalSince1970: meta.startTime)
+            guard date > cutoff else { continue }
+            let components = calendar.dateComponents([.weekday, .hour], from: date)
+            // weekday: 1=Sun…7=Sat → convert to 0=Mon…6=Sun
+            let raw = (components.weekday ?? 1) - 1  // 0=Sun…6=Sat
+            let dow = raw == 0 ? 6 : raw - 1          // 0=Mon…6=Sun
+            let hour = components.hour ?? 0
+            let key = "\(dow)-\(hour)"
+            hourlyMap[key, default: 0] += meta.totalTokens
+        }
+
+        var hourlyActivity: [HourlyActivity] = []
+        for dow in 0..<7 {
+            for hour in 0..<24 {
+                let key = "\(dow)-\(hour)"
+                hourlyActivity.append(HourlyActivity(hour: hour, dayOfWeek: dow,
+                                                      tokens: hourlyMap[key] ?? 0))
+            }
+        }
+
+        // ── 4. Expensive turns (top 20) ──────────────────────────────────
+        let allTurns: [ExpensiveTurn] = metaCache.values.flatMap { meta -> [ExpensiveTurn] in
+            let path = meta.cwd.isEmpty ? "unknown" : meta.cwd
+            let name = path == "unknown" ? "Unknown"
+                     : URL(fileURLWithPath: path).lastPathComponent
+            return meta.turns.map { turn in
+                ExpensiveTurn(
+                    id: "\(meta.sessionId)-\(turn.timestamp)",
+                    projectName: name,
+                    promptPreview: turn.promptPreview,
+                    tokens: turn.tokens,
+                    timestamp: Date(timeIntervalSince1970: turn.timestamp),
+                    model: turn.model)
+            }
+        }
+        let expensiveTurns = Array(allTurns.sorted { $0.tokens > $1.tokens }.prefix(30))
+
+        return CodexInsights(
+            projects: projects,
+            sessions: sessions,
+            hourlyActivity: hourlyActivity,
+            expensiveTurns: expensiveTurns)
+    }
+
+    // MARK: - Session Meta Cache
+
+    private func refreshSessionMetaCache() -> [String: SessionFileMeta] {
+        var metaCache = loadSessionMetaCache()
+        let prevModTimes = loadSessionModTimes()
+        var newModTimes: [String: Date] = prevModTimes
+
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(at: sessionsDir,
+                                              includingPropertiesForKeys: [.contentModificationDateKey],
+                                              options: [.skipsHiddenFiles]) else {
+            return metaCache
+        }
+
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "jsonl" else { continue }
+            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? Date.distantPast
+            newModTimes[url.path] = modDate
+
+            if prevModTimes[url.path] == nil || prevModTimes[url.path] != modDate {
+                if let parsed = parseSessionFileMeta(at: url) {
+                    metaCache[url.path] = parsed
+                } else {
+                    metaCache.removeValue(forKey: url.path)
+                }
+            }
+        }
+
+        for path in prevModTimes.keys where newModTimes[path] == nil {
+            newModTimes.removeValue(forKey: path)
+            metaCache.removeValue(forKey: path)
+        }
+
+        saveSessionMetaCache(metaCache)
+        saveSessionModTimes(newModTimes)
+        return metaCache
+    }
+
+    private func parseSessionFileMeta(at url: URL) -> SessionFileMeta? {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+
+        var sessionId  = ""
+        var cwd        = ""
+        var depth      = 0
+        var agentRole  = "default"
+        var parentId: String? = nil
+        var startTime: Double = 0
+        var firstPrompt = ""
+        var currentTurnPrompt = ""
+        var currentTurnModel  = "gpt-5"
+        var currentTurnTs: Double = 0
+        var prevInput  = 0
+        var prevOutput = 0
+        var turns: [SessionFileMeta.CachedTurn] = []
+        var sessionMetaParsed = false
+
+        func toInt(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? (v as? Int) ?? 0 }
+
+        for line in content.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty,
+                  let data = t.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            let type = json["type"] as? String
+            let tsStr = json["timestamp"] as? String
+            let tsDate = tsStr.flatMap { parseDate($0) }
+            let ts = tsDate?.timeIntervalSince1970 ?? 0
+
+            // ── session_meta ─────────────────────────────────────────────
+            if type == "session_meta", !sessionMetaParsed {
+                sessionMetaParsed = true
+                if let payload = json["payload"] as? [String: Any] {
+                    sessionId = payload["id"] as? String ?? ""
+                    cwd = payload["cwd"] as? String ?? ""
+                    startTime = ts > 0 ? ts : {
+                        if let tsPayload = payload["timestamp"] as? String,
+                           let d = parseDate(tsPayload) { return d.timeIntervalSince1970 }
+                        return 0
+                    }()
+                    agentRole = payload["agent_role"] as? String ?? "default"
+                    if let src = payload["source"] as? [String: Any],
+                       let sa  = src["subagent"] as? [String: Any],
+                       let spawn = sa["thread_spawn"] as? [String: Any] {
+                        parentId = spawn["parent_thread_id"] as? String
+                        depth    = toInt(spawn["depth"])
+                        if agentRole == "default" {
+                            agentRole = spawn["agent_role"] as? String ?? "default"
+                        }
+                    }
+                }
+                continue
+            }
+
+            // ── turn_context: model update ─────────────────────────────
+            if type == "turn_context" {
+                if let payload = json["payload"] as? [String: Any],
+                   let model = payload["model"] as? String {
+                    currentTurnModel = normalizeModel(model)
+                }
+                continue
+            }
+
+            guard type == "event_msg",
+                  let payload = json["payload"] as? [String: Any]
+            else { continue }
+
+            let payloadType = payload["type"] as? String
+
+            // ── task_started: new turn ──────────────────────────────────
+            if payloadType == "task_started" {
+                currentTurnPrompt = ""
+                currentTurnTs = ts
+                continue
+            }
+
+            // ── user_message: capture prompt ────────────────────────────
+            if payloadType == "user_message" {
+                if let msg = payload["message"] as? String {
+                    let trimmed = msg
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .components(separatedBy: "\n").first ?? ""
+                    let preview = String(trimmed.prefix(120))
+                    if firstPrompt.isEmpty { firstPrompt = preview }
+                    currentTurnPrompt = preview
+                }
+                continue
+            }
+
+            // ── token_count: compute per-turn delta ─────────────────────
+            if payloadType == "token_count",
+               let info = payload["info"] as? [String: Any] {
+                var dInput = 0; var dOutput = 0
+
+                if let total = info["total_token_usage"] as? [String: Any] {
+                    let curInput  = toInt(total["input_tokens"])
+                    let curOutput = toInt(total["output_tokens"])
+                    dInput  = max(0, curInput  - prevInput)
+                    dOutput = max(0, curOutput - prevOutput)
+                    prevInput  = curInput
+                    prevOutput = curOutput
+                } else if let last = info["last_token_usage"] as? [String: Any] {
+                    dInput  = max(0, toInt(last["input_tokens"]))
+                    dOutput = max(0, toInt(last["output_tokens"]))
+                }
+
+                let turnTokens = dInput + dOutput
+                if turnTokens > 0, !currentTurnPrompt.isEmpty {
+                    turns.append(SessionFileMeta.CachedTurn(
+                        promptPreview: currentTurnPrompt,
+                        tokens: turnTokens,
+                        timestamp: ts > 0 ? ts : currentTurnTs,
+                        model: currentTurnModel))
+                    currentTurnPrompt = ""
+                }
+            }
+        }
+
+        guard !sessionId.isEmpty || startTime > 0 else { return nil }
+        return SessionFileMeta(
+            sessionId: sessionId,
+            cwd: cwd,
+            firstPrompt: firstPrompt,
+            startTime: startTime,
+            depth: depth,
+            agentRole: agentRole,
+            parentId: parentId,
+            turns: turns)
+    }
+
+    private func loadSessionMetaCache() -> [String: SessionFileMeta] {
+        guard let data = try? Data(contentsOf: sessionMetaCacheURL),
+              let dict = try? JSONDecoder().decode([String: SessionFileMeta].self, from: data)
+        else { return [:] }
+        return dict
+    }
+
+    private func saveSessionMetaCache(_ cache: [String: SessionFileMeta]) {
+        guard let data = try? JSONEncoder().encode(cache) else { return }
+        try? data.write(to: sessionMetaCacheURL, options: .atomic)
+    }
+
+    private func loadSessionModTimes() -> [String: Date] {
+        guard let data = try? Data(contentsOf: sessionModTimeCacheURL),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Double]
+        else { return [:] }
+        return dict.mapValues { Date(timeIntervalSince1970: $0) }
+    }
+
+    private func saveSessionModTimes(_ times: [String: Date]) {
+        let dict = times.mapValues { $0.timeIntervalSince1970 }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+        try? data.write(to: sessionModTimeCacheURL, options: .atomic)
     }
 
     // MARK: - Date / Model Helpers
