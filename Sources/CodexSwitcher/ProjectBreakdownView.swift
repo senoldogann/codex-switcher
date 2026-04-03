@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct ProjectBreakdownView: View {
     @EnvironmentObject var store: AppStore
@@ -151,16 +153,21 @@ struct ProjectBreakdownView: View {
     }
 
     private func exportCSV() {
-        var csv = "Project,Path,Tokens,Cost USD,Sessions,Last Used\n"
-        for p in store.projectUsage {
-            let date = ISO8601DateFormatter().string(from: p.lastUsed)
-            csv += "\"\(p.name)\",\"\(p.path)\",\(p.tokens),\(String(format:"%.4f",p.cost)),\(p.sessionCount),\"\(date)\"\n"
-        }
+        let csv = ProjectCSVExporter.buildCSV(for: store.projectUsage)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "codex-usage.csv"
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            try? csv.write(to: url, atomically: true, encoding: .utf8)
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSSound.beep()
         }
     }
 

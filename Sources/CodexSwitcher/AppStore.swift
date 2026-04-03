@@ -12,6 +12,7 @@ final class AppStore: ObservableObject {
     @Published var activeProfile: Profile?
     @Published var isAddingAccount: Bool = false
     @Published var addingStep: AddingStep = .idle
+    @Published var addAccountErrorMessage: String?
     @Published var pendingProfileEmail: String = ""
     @Published var aliasText: String = ""
     @Published var allExhausted: Bool = false
@@ -34,6 +35,10 @@ final class AppStore: ObservableObject {
     @Published var hourlyActivity: [HourlyActivity] = []
     @Published var expensiveTurns: [ExpensiveTurn] = []
     @Published var analyticsTimeRange: AnalyticsTimeRange = .sevenDays
+    @Published var switchOrchestrationState: SwitchOrchestrationState = .idle
+    @Published var pendingSwitchRequest: PendingSwitchRequest?
+    @Published var lastSeamlessSwitchResult: SeamlessSwitchResult?
+    @Published var switchReliability = SwitchReliabilitySnapshot()
 
     private var lastBudgetAlertDate: Date?
     private var lastWeeklySummaryDate: Date?
@@ -121,6 +126,9 @@ final class AppStore: ObservableObject {
     private var tokenRefreshWork: DispatchWorkItem?
     private var warned80PercentIds: Set<UUID> = []
     private var reloginTargetId: UUID? = nil
+    private var sessionActivitySequence = 0
+    private var switchOrchestrator = SwitchOrchestrator()
+    private var seamlessVerificationWork: DispatchWorkItem?
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -144,17 +152,14 @@ final class AppStore: ObservableObject {
         }
         usageMonitor.onSessionActivity = { [weak self] in
             Task { @MainActor in
-                self?.isSessionActive = true
-                // Reset after 5 seconds of no activity
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                    self?.isSessionActive = false
-                }
+                self?.recordSessionActivity()
             }
         }
         usageMonitor.start()
         startUsagePolling()
         startRateLimitPolling()
         refreshTokenUsage()
+        syncSwitchOrchestrationState()
     }
 
     // MARK: - Rate Limit Polling
@@ -508,7 +513,11 @@ final class AppStore: ObservableObject {
 
     func switchTo(profile: Profile) {
         captureUsageForActive()
-        activateCandidate(profile, reason: L("Manuel seçim", "Manual selection"))
+        switchTo(profile: profile, reason: L("Manuel seçim", "Manual selection"))
+    }
+
+    private func switchTo(profile: Profile, reason: String) {
+        activateCandidate(profile, reason: reason)
     }
 
     private func activateCandidate(_ candidate: Profile, reason: String) {
@@ -571,7 +580,7 @@ final class AppStore: ObservableObject {
         notifyProfileChanged()
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
-        restartAIIfRunning(for: candidate)
+        attemptSeamlessSwitch(for: candidate)
     }
 
     // MARK: - AI Restart
@@ -664,8 +673,18 @@ final class AppStore: ObservableObject {
             }
             // Hesap verisi yoksa (API başarısız) → ihtiyatlı olarak geç
 
+            if self.switchOrchestrationState == .verifying {
+                self.handleSeamlessVerificationFailure()
+                return
+            }
+
             lastAutoSwitchDate = Date()
-            switchToNext(reason: L("Limit doldu", "Limit reached"))
+            let reason = L("Limit doldu", "Limit reached")
+            if self.isSessionActive {
+                self.queuePendingSwitch(reason: reason)
+                return
+            }
+            self.switchToNext(reason: reason)
         }
     }
 
@@ -676,6 +695,7 @@ final class AppStore: ObservableObject {
     func openAddAccountWindow() {
         addingStep = .idle
         isAddingAccount = false
+        addAccountErrorMessage = nil
         pendingProfileEmail = ""
         aliasText = ""
 
@@ -713,6 +733,7 @@ final class AppStore: ObservableObject {
     func closeAddAccountWindow() { addAccountWindow?.close() }
 
     func beginAddAccount() {
+        addAccountErrorMessage = nil
         isAddingAccount = true
         addingStep = .waitingLogin
 
@@ -765,6 +786,7 @@ final class AppStore: ObservableObject {
         stopCodexLoginProcess(suppressFailureFeedback: true)
         addingStep = .idle
         isAddingAccount = false
+        addAccountErrorMessage = L("Login zaman aşımına uğradı. Tekrar deneyin.", "Login timed out. Please try again.")
         stopAuthWatcher()
     }
 
@@ -788,6 +810,7 @@ final class AppStore: ObservableObject {
         profiles = config.profiles
         addingStep = .done
         isAddingAccount = false
+        addAccountErrorMessage = nil
         stopAuthWatcher()
         closeAddAccountWindow()
         notifyProfileChanged()
@@ -800,6 +823,7 @@ final class AppStore: ObservableObject {
         stopCodexLoginProcess(suppressFailureFeedback: true)
         isAddingAccount = false
         addingStep = .idle
+        addAccountErrorMessage = nil
         pendingProfileEmail = ""
         aliasText = ""
         stopAuthWatcher()
@@ -978,6 +1002,7 @@ final class AppStore: ObservableObject {
         guard FileManager.default.isExecutableFile(atPath: codexPath) else {
             isAddingAccount = false
             addingStep = .idle
+            addAccountErrorMessage = L("`codex` komutu bulunamadı.", "`codex` command was not found.")
             sendNotification(
                 title: L("Login başlatılamadı", "Login could not start"),
                 body: L("`codex` komutu bulunamadı.", "`codex` command was not found.")
@@ -985,10 +1010,11 @@ final class AppStore: ObservableObject {
             return false
         }
 
+        let command = CodexLoginCommand.shellWrapped(codexPath: codexPath)
         let pipe = Pipe()
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: codexPath)
-        task.arguments = ["login"]
+        task.executableURL = URL(fileURLWithPath: command.executablePath)
+        task.arguments = command.arguments
         task.standardInput = nil
         task.standardOutput = pipe
         task.standardError = pipe
@@ -1020,6 +1046,7 @@ final class AppStore: ObservableObject {
             stopCodexLoginProcess(suppressFailureFeedback: true)
             isAddingAccount = false
             addingStep = .idle
+            addAccountErrorMessage = error.localizedDescription
             sendNotification(
                 title: L("Login başlatılamadı", "Login could not start"),
                 body: error.localizedDescription
@@ -1036,6 +1063,7 @@ final class AppStore: ObservableObject {
               let url = CodexLoginOutputParser.authorizationURL(in: loginOutputBuffer) else { return }
 
         didOpenLoginBrowser = true
+        NSApp.activate(ignoringOtherApps: true)
         NSWorkspace.shared.open(url)
     }
 
@@ -1050,6 +1078,10 @@ final class AppStore: ObservableObject {
             isAddingAccount = false
             addingStep = .idle
             stopAuthWatcher()
+            addAccountErrorMessage = L(
+                "Codex login süreci erken kapandı. Tarayıcı bağlantısı üretilemedi.",
+                "Codex login exited early before it could provide a browser link."
+            )
             sendNotification(
                 title: L("Login başlatılamadı", "Login could not start"),
                 body: L("Codex login süreci erken kapandı. Browser linki üretilemedi.", "Codex login exited early before it could provide a browser link.")
@@ -1072,6 +1104,138 @@ final class AppStore: ObservableObject {
         loginProcess = nil
         loginOutputBuffer = ""
         didOpenLoginBrowser = false
+    }
+
+    private func recordSessionActivity() {
+        sessionActivitySequence += 1
+        let currentSequence = sessionActivitySequence
+        isSessionActive = true
+        scheduleSeamlessVerificationSuccess(sequence: currentSequence)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.sessionActivitySequence == currentSequence else { return }
+            self.isSessionActive = false
+            self.processPendingSwitchIfNeeded(trigger: "session-idle")
+        }
+    }
+
+    private func queuePendingSwitch(reason: String) {
+        guard switchOrchestrator.pendingRequest == nil else { return }
+        guard let candidate = smartNextProfile(auto: true) else {
+            allExhausted = true
+            sendNotification(title: Str.allExhausted, body: L("Limitler sıfırlanınca devam eder.", "Will resume when limits reset."))
+            return
+        }
+
+        let request = PendingSwitchRequest(
+            targetProfileId: candidate.id,
+            targetProfileName: candidate.displayName,
+            reason: reason,
+            queuedAt: Date()
+        )
+        _ = switchOrchestrator.queue(
+            request: request,
+            detail: L("Aktif iş bitene kadar geçiş ertelendi.", "Switch was deferred until the active work finished.")
+        )
+        syncSwitchOrchestrationState()
+    }
+
+    private func processPendingSwitchIfNeeded(trigger: String) {
+        guard let pending = switchOrchestrator.readySwitchIfPossible(isSessionActive: isSessionActive) else { return }
+        guard let candidate = profiles.first(where: { $0.id == pending.targetProfileId }) else {
+            switchOrchestrator.clearPending()
+            syncSwitchOrchestrationState()
+            return
+        }
+
+        syncSwitchOrchestrationState()
+        switchTo(profile: candidate, reason: "\(pending.reason) · \(trigger)")
+        switchOrchestrator.finishSwitchCycle()
+        syncSwitchOrchestrationState()
+    }
+
+    private func attemptSeamlessSwitch(for candidate: Profile) {
+        guard isCodexRunning() else {
+            switchOrchestrator.markInconclusive(
+                detail: L(
+                    "Codex çalışmıyordu; geçiş yeniden başlatma gerektirmeden tamamlandı.",
+                    "Codex was not running, so the switch completed without needing a restart."
+                )
+            )
+            syncSwitchOrchestrationState()
+            return
+        }
+
+        switchOrchestrator.startVerifying(
+            targetProfileId: candidate.id,
+            targetProfileName: candidate.displayName
+        )
+        syncSwitchOrchestrationState()
+
+        seamlessVerificationWork?.cancel()
+        let timeoutWork = DispatchWorkItem { [weak self] in
+            guard let self, self.switchOrchestrationState == .verifying else { return }
+            self.switchOrchestrator.markInconclusive(
+                detail: L(
+                    "Yeni istek gözlenemedi; geçiş yeniden başlatmasız bırakıldı.",
+                    "No new request was observed; the switch was left restart-free."
+                )
+            )
+            self.syncSwitchOrchestrationState()
+        }
+        seamlessVerificationWork = timeoutWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: timeoutWork)
+    }
+
+    private func scheduleSeamlessVerificationSuccess(sequence: Int) {
+        guard switchOrchestrationState == .verifying else { return }
+
+        seamlessVerificationWork?.cancel()
+        let successWork = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.switchOrchestrationState == .verifying,
+                  self.sessionActivitySequence == sequence,
+                  let activeProfile else { return }
+
+            let verifyResult = self.profileManager.verifyActiveAccount(expectedAccountId: activeProfile.accountId)
+            guard case .verified = verifyResult else { return }
+
+            self.switchOrchestrator.completeSeamlessSuccess(
+                detail: L(
+                    "Yeni oturum aktivitesi gözlendi; geçiş yeniden başlatmasız doğrulandı.",
+                    "New session activity was observed; the switch was verified without restarting."
+                )
+            )
+            self.syncSwitchOrchestrationState()
+        }
+        seamlessVerificationWork = successWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: successWork)
+    }
+
+    private func handleSeamlessVerificationFailure() {
+        guard let activeProfile else { return }
+        seamlessVerificationWork?.cancel()
+        switchOrchestrator.recordFallbackRestart(
+            detail: L(
+                "Yeni istek sonrası limit hatası devam etti; yeniden başlatma fallback uygulandı.",
+                "Rate-limit behavior persisted after the switch; restart fallback was applied."
+            )
+        )
+        syncSwitchOrchestrationState()
+        restartAIIfRunning(for: activeProfile)
+    }
+
+    private func isCodexRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains {
+            $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
+        }
+    }
+
+    private func syncSwitchOrchestrationState() {
+        switchOrchestrationState = switchOrchestrator.state
+        pendingSwitchRequest = switchOrchestrator.pendingRequest
+        lastSeamlessSwitchResult = switchOrchestrator.lastResult
+        switchReliability = switchOrchestrator.reliability
     }
 
     private func notifyProfileChanged() {

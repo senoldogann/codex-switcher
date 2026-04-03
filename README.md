@@ -99,8 +99,9 @@ What it does:
 1. CodexSwitcher watches `~/.codex/sessions/` for rate-limit signals
 2. On detection it calls the rate-limit API to **confirm** the limit is actually reached (no false positives)
 3. If confirmed, it atomically replaces `~/.codex/auth.json` with the best available account
-4. Codex is force-quit and relaunched so it picks up the new credentials
-5. The switch is verified — if verification fails, automatic rollback occurs
+4. If work is still active, the switch is queued until a safe boundary is reached
+5. CodexSwitcher prefers a seamless next-request handoff without restarting Codex
+6. If verification fails, restart is used as controlled fallback
 
 Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_tokens` from each session's JSONL events and maps them to the account that was active at that timestamp.
 
@@ -140,6 +141,12 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ### v2.1.1
 - **Left rail navigation** — Reworked the menu actions into a compact vertical sidebar while preserving the existing glass styling
 - **Sidebar proportion polish** — Increased popover width and tightened the rail so account cards keep a cleaner, less cramped layout
+- **Layout tightening** — Reduced wasted top and bottom space in the main list, add-account flow, and footer strip
+- **Add Account fix** — `Start` now launches `codex login` through a login shell more reliably and shows visible failure feedback
+- **Projects CSV fix** — CSV export now opens a real save flow and writes stable escaped output
+- **Safe switch boundary** — Auto-switches now queue during active work and execute after the session goes idle
+- **Seamless switch verification** — The app now prefers restart-free switching and only falls back to restarting Codex if post-switch limit behavior still indicates failure
+- **Reliability summary** — History now shows compact queued, seamless, and fallback switch metrics
 - **Range filter accuracy** — Insights now include recent turns from older sessions instead of dropping active long-lived sessions
 - **Range-safe chart summary** — Per-account cost label in the chart view is now shown only for the matching 7-day cost window
 

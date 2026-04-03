@@ -69,6 +69,47 @@ struct AppConfig: Codable {
     static let empty = AppConfig(profiles: [], activeProfileId: nil, roundRobinIndex: 0)
 }
 
+enum SwitchOrchestrationState: String, Codable {
+    case idle
+    case pendingSwitch
+    case readyToSwitch
+    case verifying
+}
+
+struct PendingSwitchRequest: Equatable {
+    let targetProfileId: UUID
+    let targetProfileName: String
+    let reason: String
+    let queuedAt: Date
+}
+
+struct SeamlessSwitchResult: Equatable {
+    enum Outcome: String, Codable {
+        case deferred
+        case seamlessSuccess
+        case fallbackRestart
+        case inconclusive
+    }
+
+    let outcome: Outcome
+    let recordedAt: Date
+    let detail: String
+}
+
+struct SeamlessVerificationAttempt: Equatable {
+    let targetProfileId: UUID
+    let targetProfileName: String
+    let startedAt: Date
+}
+
+struct SwitchReliabilitySnapshot: Equatable {
+    var pendingSwitchCount: Int = 0
+    var completedDeferredSwitchCount: Int = 0
+    var seamlessSuccessCount: Int = 0
+    var inconclusiveCount: Int = 0
+    var fallbackRestartCount: Int = 0
+}
+
 // MARK: - Switch History
 
 struct SwitchEvent: Codable, Identifiable {

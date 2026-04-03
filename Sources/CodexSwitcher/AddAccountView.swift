@@ -69,8 +69,8 @@ struct AddAccountView: View {
     // MARK: - Idle
 
     private var idleView: some View {
-        VStack(spacing: 20) {
-            iconCircle(systemName: "person.badge.plus", color: gw.opacity(0.12))
+            VStack(spacing: 20) {
+                iconCircle(systemName: "person.badge.plus", color: gw.opacity(0.12))
 
             VStack(spacing: 6) {
                 Text(Str.newAccount)
@@ -80,6 +80,14 @@ struct AddAccountView: View {
                 Text(Str.loginDesc)
                     .font(.system(size: 12))
                     .foregroundStyle(gw.opacity(0.4))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+
+            if let error = store.addAccountErrorMessage {
+                Text(error)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.orange.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
             }

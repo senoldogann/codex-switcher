@@ -23,8 +23,9 @@ struct AddAccountInlineView: View {
             case .done:          doneView
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 14)
-        .padding(.vertical, 16)
+        .padding(.vertical, 12)
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: store.addingStep)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
@@ -59,6 +60,15 @@ struct AddAccountInlineView: View {
                     .foregroundStyle(gw.opacity(0.4))
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
+            }
+
+            if let error = store.addAccountErrorMessage {
+                Text(error)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.orange.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .padding(.horizontal, 8)
             }
 
             HStack(spacing: 8) {

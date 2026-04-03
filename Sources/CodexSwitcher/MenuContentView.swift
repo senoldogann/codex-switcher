@@ -86,8 +86,7 @@ struct MenuContentView: View {
                 }
             }
         }
-        .frame(minHeight: 300)
-        .frame(maxHeight: store.allExhausted ? 360 : 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var exhaustionBanner: some View {
@@ -127,26 +126,27 @@ struct MenuContentView: View {
 
     private var historyContent: some View {
         VStack(spacing: 0) {
-            // Tab bar — 6 tabs, icon only to fit
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    iconTab("list.bullet",                   L("Geçmiş","History"),   historyTab == .list)      { historyTab = .list }
-                    tabDivider
-                    iconTab("chart.line.uptrend.xyaxis",     L("Grafik","Chart"),     historyTab == .chart)     { historyTab = .chart }
-                    tabDivider
-                    iconTab("folder.fill",                   L("Projeler","Projects"),historyTab == .projects)  { historyTab = .projects }
-                    tabDivider
-                    iconTab("bubble.left.and.bubble.right",  L("Oturumlar","Sess."),  historyTab == .sessions)  { historyTab = .sessions }
-                    tabDivider
-                    iconTab("square.grid.2x2",               L("Isı","Heatmap"),      historyTab == .heatmap)   { historyTab = .heatmap }
-                    tabDivider
-                    iconTab("flame.fill",                    L("Pahalı","Top $"),     historyTab == .expensive) { historyTab = .expensive }
-                }
+            HStack(spacing: 0) {
+                iconTab("list.bullet",                   L("Geçmiş","History"),   historyTab == .list)      { historyTab = .list }
+                tabDivider
+                iconTab("chart.line.uptrend.xyaxis",     L("Grafik","Chart"),     historyTab == .chart)     { historyTab = .chart }
+                tabDivider
+                iconTab("folder.fill",                   L("Projeler","Projects"),historyTab == .projects)  { historyTab = .projects }
+                tabDivider
+                iconTab("bubble.left.and.bubble.right",  L("Oturumlar","Sess."),  historyTab == .sessions)  { historyTab = .sessions }
+                tabDivider
+                iconTab("square.grid.2x2",               L("Isı","Heatmap"),      historyTab == .heatmap)   { historyTab = .heatmap }
+                tabDivider
+                iconTab("flame.fill",                    L("Pahalı","Top $"),     historyTab == .expensive) { historyTab = .expensive }
             }
-            .frame(height: 36)
-            .padding(.horizontal, 14)
+            .frame(height: 38)
+            .padding(.horizontal, 10)
+            .padding(.top, 2)
+            .padding(.bottom, 2)
 
             analyticsRangeBar
+
+            switchReliabilitySummary
 
             Divider().background(gw.opacity(0.06))
 
@@ -184,12 +184,13 @@ struct MenuContentView: View {
                     ExpensivePromptsView().environmentObject(store)
                 }
             }
-            .frame(maxHeight: 420)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var tabDivider: some View {
-        Divider().frame(height: 14).background(gw.opacity(0.08))
+        Divider().frame(height: 18).background(gw.opacity(0.08))
     }
 
     private var analyticsRangeBar: some View {
@@ -222,20 +223,89 @@ struct MenuContentView: View {
         .padding(.bottom, 6)
     }
 
+    private var switchReliabilitySummary: some View {
+        HStack(spacing: 10) {
+            summaryPill(
+                label: L("Bekleyen", "Queued"),
+                value: "\(store.switchReliability.pendingSwitchCount)",
+                tint: .orange
+            )
+            summaryPill(
+                label: L("Sessiz geçiş", "Seamless"),
+                value: "\(store.switchReliability.seamlessSuccessCount)",
+                tint: .green
+            )
+            summaryPill(
+                label: L("Fallback", "Fallback"),
+                value: "\(store.switchReliability.fallbackRestartCount)",
+                tint: .blue
+            )
+
+            Spacer(minLength: 0)
+
+            if let lastResult = store.lastSeamlessSwitchResult {
+                Text(switchOutcomeLabel(lastResult.outcome))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(switchOutcomeColor(lastResult.outcome).opacity(0.75))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 6)
+    }
+
     private func iconTab(_ icon: String, _ label: String, _ selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 9, weight: selected ? .semibold : .regular))
                 Text(label)
-                    .font(.system(size: 8, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 7, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .frame(minWidth: 44)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 34)
             .foregroundStyle(selected ? gw.opacity(0.8) : gw.opacity(0.32))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .pointerCursor()
+    }
+
+    private func summaryPill(label: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(gw.opacity(0.28))
+            Text(value)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.8))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(gw.opacity(0.05))
+        )
+    }
+
+    private func switchOutcomeLabel(_ outcome: SeamlessSwitchResult.Outcome) -> String {
+        switch outcome {
+        case .deferred: return L("Ertelendi", "Deferred")
+        case .seamlessSuccess: return L("Doğrulandı", "Verified")
+        case .fallbackRestart: return L("Restart fallback", "Restart fallback")
+        case .inconclusive: return L("Belirsiz", "Inconclusive")
+        }
+    }
+
+    private func switchOutcomeColor(_ outcome: SeamlessSwitchResult.Outcome) -> Color {
+        switch outcome {
+        case .deferred: return .orange
+        case .seamlessSuccess: return .green
+        case .fallbackRestart: return .blue
+        case .inconclusive: return gw
+        }
     }
 
     private func tabBtn(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -258,8 +328,7 @@ struct MenuContentView: View {
 
     private var addAccountContent: some View {
         AddAccountInlineView().environmentObject(store)
-            .frame(minHeight: 300)
-            .frame(maxHeight: 420)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Empty
@@ -404,7 +473,7 @@ struct MenuContentView: View {
                     .foregroundStyle(isActive ? gw.opacity(0.45) : gw.opacity(0.2))
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
             .background(
                 isActive
@@ -676,7 +745,7 @@ struct MenuContentView: View {
 
                 updateRailButton
             }
-            .padding(.top, 10)
+            .padding(.top, 6)
 
             Spacer(minLength: 10)
 
@@ -717,13 +786,37 @@ struct MenuContentView: View {
                     NSApplication.shared.terminate(nil)
                 }
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 6)
         }
         .frame(width: 68)
     }
 
     private var updateStatusStrip: some View {
         HStack(spacing: 8) {
+            if let pending = store.pendingSwitchRequest {
+                Text(L("Sırada", "Queued"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.orange.opacity(0.78))
+
+                Text(pending.targetProfileName)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.34))
+
+                Text("·")
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.18))
+            }
+
+            if store.switchOrchestrationState == .verifying {
+                Text(L("Doğrulanıyor", "Verifying"))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.blue.opacity(0.72))
+
+                Text("·")
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.18))
+            }
+
             Text("v\(store.updateStatus.currentVersion)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(gw.opacity(0.42))
@@ -749,7 +842,7 @@ struct MenuContentView: View {
                 .foregroundStyle(updateStateColor.opacity(0.72))
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 5)
     }
 
     // MARK: - Budget
