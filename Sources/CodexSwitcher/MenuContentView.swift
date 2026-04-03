@@ -256,12 +256,10 @@ struct MenuContentView: View {
 
     private func healthDot(for profile: Profile) -> some View {
         let color: Color = {
-            if store.staleProfileIds.contains(profile.id) {
-                return .yellow
-            }
-            if store.rateLimits[profile.id] != nil {
-                return .green
-            }
+            // Claude Code: always green (no rate-limit API, credentials managed via Keychain)
+            if profile.aiProvider == .claudeCode { return .green }
+            if store.staleProfileIds.contains(profile.id) { return .yellow }
+            if store.rateLimits[profile.id] != nil { return .green }
             return .gray
         }()
 
@@ -281,7 +279,7 @@ struct MenuContentView: View {
             if !isActive { store.switchTo(profile: profile) }
         } label: {
             HStack(alignment: .center, spacing: 12) {
-                codexAvatar(size: 36, active: isActive)
+                profileAvatar(profile, size: 36, active: isActive)
                 healthDot(for: profile)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -333,46 +331,48 @@ struct MenuContentView: View {
                         .blur(radius: emailsBlurred ? 5 : 0)
                         .animation(.easeInOut(duration: 0.2), value: emailsBlurred)
 
-                    // Rate limit rows
-                    if let info = rl {
-                        rateLimitRows(info: info)
-                    } else if store.isFetchingLimits {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(height: 12)
-                    }
-
-                    // Token usage (show for all accounts with usage data)
-                    if let u = usage, u.totalTokens > 0 {
-                        tokenUsageRow(u)
-                    }
-
-                    // Cost
-                    if let cost = store.costs[profile.id], cost > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(gw.opacity(0.3))
-                            Text(CostCalculator.format(cost))
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(gw.opacity(0.35))
+                    if profile.aiProvider == .claudeCode {
+                        // Claude Code — show subscription type, no Codex rate-limit bars
+                        claudeCodeInfoRow(profile: profile, usage: usage)
+                    } else {
+                        // Codex — rate limit bars, spinner, forecast
+                        if let info = rl {
+                            rateLimitRows(info: info)
+                        } else if store.isFetchingLimits {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .frame(height: 12)
                         }
-                    }
 
-                    // Risk forecast
-                    if let forecast = store.forecasts[profile.id],
-                       forecast.riskLevel != .safe && forecast.riskLevel != .exhausted {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color(forecast.riskLevel.color))
-                                .frame(width: 6, height: 6)
-                            Text(forecast.riskLevel.label)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(gw.opacity(0.35))
-                            if !forecast.timeToExhaustionLabel.isEmpty {
-                                Text(forecast.timeToExhaustionLabel)
-                                    .font(.system(size: 9, design: .monospaced))
+                        if let u = usage, u.totalTokens > 0 {
+                            tokenUsageRow(u)
+                        }
+
+                        if let cost = store.costs[profile.id], cost > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "dollarsign.circle.fill")
+                                    .font(.system(size: 8))
                                     .foregroundStyle(gw.opacity(0.3))
+                                Text(CostCalculator.format(cost))
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(gw.opacity(0.35))
+                            }
+                        }
+
+                        if let forecast = store.forecasts[profile.id],
+                           forecast.riskLevel != .safe && forecast.riskLevel != .exhausted {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color(forecast.riskLevel.color))
+                                    .frame(width: 6, height: 6)
+                                Text(forecast.riskLevel.label)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(gw.opacity(0.35))
+                                if !forecast.timeToExhaustionLabel.isEmpty {
+                                    Text(forecast.timeToExhaustionLabel)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(gw.opacity(0.3))
+                                }
                             }
                         }
                     }
@@ -564,6 +564,68 @@ struct MenuContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Profile Avatar (provider-aware)
+
+    @ViewBuilder
+    private func profileAvatar(_ profile: Profile, size: CGFloat, active: Bool) -> some View {
+        switch profile.aiProvider {
+        case .codex:
+            codexAvatar(size: size, active: active)
+        case .claudeCode:
+            claudeAvatar(size: size, active: active)
+        }
+    }
+
+    private func claudeAvatar(size: CGFloat, active: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.8, green: 0.5, blue: 0.25),
+                                 Color(red: 0.65, green: 0.3, blue: 0.15)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+            Image(systemName: "sparkles")
+                .font(.system(size: size * 0.38, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
+        }
+        .frame(width: size, height: size)
+        .opacity(active ? 1 : 0.42)
+    }
+
+    // MARK: - Claude Code Info Row
+
+    private func claudeCodeInfoRow(profile: Profile, usage: AccountTokenUsage?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Subscription badge
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color(red: 0.8, green: 0.5, blue: 0.25).opacity(0.8))
+                Text("Claude Code")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(gw.opacity(0.45))
+            }
+
+            // Token usage from session files if available
+            if let u = usage, u.totalTokens > 0 {
+                tokenUsageRow(u)
+            }
+
+            // Cost if available
+            if let cost = store.costs[profile.id], cost > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(gw.opacity(0.3))
+                    Text(CostCalculator.format(cost))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(gw.opacity(0.35))
+                }
+            }
+        }
     }
 
     // MARK: - Codex Avatar
