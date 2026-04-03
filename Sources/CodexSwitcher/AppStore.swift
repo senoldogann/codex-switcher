@@ -742,8 +742,11 @@ final class AppStore: ObservableObject {
 
     private func claudeKeychainUpdated(data: Data) {
         guard addingStep == .waitingLogin else { return }
-        guard let email = ClaudeCodeManager.parseEmail(from: data),
-              !email.isEmpty else { return }
+        // Claude Code uses opaque (non-JWT) tokens — email may not be parseable.
+        // Fall back to subscription type label so the flow can always advance.
+        let email = ClaudeCodeManager.parseEmail(from: data)
+            ?? ClaudeCodeManager.parseDisplayLabel(from: data)
+            ?? "Claude Code"
         pendingProfileEmail = email
         cancelLoginTimeout()
         addingStep = .confirmProfile

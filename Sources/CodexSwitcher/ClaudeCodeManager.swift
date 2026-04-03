@@ -48,20 +48,33 @@ struct ClaudeCodeManager: Sendable {
         return jwtClaim("email", in: jwt)
     }
 
-    /// Stable account identifier: organizationUuid if present, else JWT "sub".
+    /// Stable account identifier: organizationUuid → JWT "sub" → token prefix hash.
     static func parseAccountId(from data: Data) -> String? {
         if let json = jsonDict(from: data),
            let orgId = json["organizationUuid"] as? String, !orgId.isEmpty {
             return orgId
         }
-        guard let jwt = oauthAccessToken(from: data) else { return nil }
-        return jwtClaim("sub", in: jwt)
+        if let jwt = oauthAccessToken(from: data) {
+            // Try JWT sub claim (only works for JWT-format tokens)
+            if let sub = jwtClaim("sub", in: jwt) { return sub }
+            // Opaque token: use first 16 chars as stable prefix ID
+            if jwt.count >= 16 { return String(jwt.prefix(16)) }
+        }
+        return nil
     }
 
     static func parseSubscriptionType(from data: Data) -> String? {
         guard let json = jsonDict(from: data),
               let oauth = json["claudeAiOauth"] as? [String: Any] else { return nil }
         return oauth["subscriptionType"] as? String
+    }
+
+    /// Human-readable label when email is not extractable (opaque tokens).
+    /// Returns e.g. "Pro Account" or "Claude Code Account".
+    static func parseDisplayLabel(from data: Data) -> String? {
+        guard let sub = parseSubscriptionType(from: data) else { return nil }
+        let capitalized = sub.prefix(1).uppercased() + sub.dropFirst()
+        return "\(capitalized) Account"
     }
 
     // MARK: - Helpers
