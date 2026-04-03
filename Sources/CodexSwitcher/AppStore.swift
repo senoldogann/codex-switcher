@@ -134,6 +134,7 @@ final class AppStore: ObservableObject {
     private var syncedTimelineEventCount = 0
     private var lastAutomationAlertFingerprint: String?
     private var analyticsWindow: NSWindow?
+    private var rateLimitAuditSamples: [UUID: [RateLimitAuditSample]] = [:]
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -236,6 +237,7 @@ final class AppStore: ObservableObject {
             switch result {
             case .success(let info, let diagnostic):
                 rateLimits[id] = info
+                appendRateLimitAuditSample(for: id, info: info, checkedAt: diagnostic.checkedAt)
                 successCount += 1
                 let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
                 rateLimitHealth[id] = RateLimitHealthStatus(
@@ -318,6 +320,7 @@ final class AppStore: ObservableObject {
         let rateLimits = self.rateLimits
         let rateLimitHealth = self.rateLimitHealth
         let paceHistory = self.paceHistory
+        let auditSamples = self.rateLimitAuditSamples
         DispatchQueue.global(qos: .utility).async {
             let result   = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
             let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId, range: range)
@@ -335,6 +338,7 @@ final class AppStore: ObservableObject {
                 usageRecords: records,
                 dailyUsageByProfile: daily,
                 sessionRecords: sessionRecords,
+                auditSamples: auditSamples,
                 rateLimits: rateLimits,
                 rateLimitHealth: rateLimitHealth,
                 forecasts: newForecasts
@@ -958,6 +962,7 @@ final class AppStore: ObservableObject {
         forecasts      = [:]
         analyticsSnapshot = .empty(for: analyticsTimeRange)
         paceHistory    = []
+        rateLimitAuditSamples = [:]
         warned80PercentIds = []
 
         refreshTokenUsage()
@@ -1363,6 +1368,29 @@ final class AppStore: ObservableObject {
             now: now
         )
         emitAutomationAlertIfNeeded()
+    }
+
+    private func appendRateLimitAuditSample(for profileId: UUID, info: RateLimitInfo, checkedAt: Date) {
+        let sample = RateLimitAuditSample(
+            timestamp: checkedAt,
+            weeklyRemainingPercent: info.weeklyRemainingPercent,
+            fiveHourRemainingPercent: info.fiveHourRemainingPercent,
+            limitReached: info.limitReached
+        )
+
+        var samples = rateLimitAuditSamples[profileId] ?? []
+        if let last = samples.last,
+           last.weeklyRemainingPercent == sample.weeklyRemainingPercent,
+           last.fiveHourRemainingPercent == sample.fiveHourRemainingPercent,
+           last.limitReached == sample.limitReached,
+           checkedAt.timeIntervalSince(last.timestamp) < 60 {
+            return
+        }
+        samples.append(sample)
+        if samples.count > 240 {
+            samples.removeFirst(samples.count - 240)
+        }
+        rateLimitAuditSamples[profileId] = samples
     }
 
     private func emitAutomationAlertIfNeeded() {

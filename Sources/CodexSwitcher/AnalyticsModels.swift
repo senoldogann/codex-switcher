@@ -108,6 +108,13 @@ struct AnalyticsTrendPoint: Identifiable, Equatable, Sendable {
     var id: TimeInterval { start.timeIntervalSince1970 }
 }
 
+struct RateLimitAuditSample: Equatable, Sendable {
+    let timestamp: Date
+    let weeklyRemainingPercent: Int?
+    let fiveHourRemainingPercent: Int?
+    let limitReached: Bool
+}
+
 struct AnalyticsBreakdownItem: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
@@ -132,12 +139,65 @@ struct AnalyticsLimitPressure: Identifiable, Equatable, Sendable {
     var id: UUID { profileId }
 }
 
+enum AnalyticsUsageAuditStatus: String, Codable, Equatable, Sendable {
+    case explained
+    case weakAttribution
+    case unattributed
+}
+
+struct AnalyticsUsageAuditEntry: Identifiable, Equatable, Sendable {
+    let profileId: UUID
+    let profileName: String
+    let windowStart: Date
+    let windowEnd: Date
+    let weeklyDropPercent: Int
+    let fiveHourDropPercent: Int
+    let localTokens: Int
+    let localSessionCount: Int
+    let idleWindow: Bool
+    let status: AnalyticsUsageAuditStatus
+
+    var id: String {
+        "\(profileId.uuidString)-\(windowEnd.timeIntervalSince1970)"
+    }
+}
+
+struct AnalyticsUsageAuditPoint: Identifiable, Equatable, Sendable {
+    let timestamp: Date
+    let weeklyDropPercent: Int
+    let fiveHourDropPercent: Int
+    let localTokens: Int
+    let idleWindow: Bool
+    let status: AnalyticsUsageAuditStatus
+
+    var id: TimeInterval { timestamp.timeIntervalSince1970 }
+}
+
+struct AnalyticsUsageAuditSummary: Equatable, Sendable {
+    let explainedCount: Int
+    let weakAttributionCount: Int
+    let unattributedCount: Int
+    let idleDrainCount: Int
+    let totalDrainEvents: Int
+    let latestEventAt: Date?
+
+    static let empty = AnalyticsUsageAuditSummary(
+        explainedCount: 0,
+        weakAttributionCount: 0,
+        unattributedCount: 0,
+        idleDrainCount: 0,
+        totalDrainEvents: 0,
+        latestEventAt: nil
+    )
+}
+
 enum AnalyticsAlertKind: String, Codable, Equatable, Sendable {
     case costSpike
     case acceleratedUsage
     case projectConcentration
     case limitPressure
     case staleData
+    case unattributedDrain
 }
 
 enum AnalyticsAlertSeverity: String, Codable, Equatable, Sendable {
@@ -176,6 +236,9 @@ struct AnalyticsSnapshot: Equatable, Sendable {
     let hourlyActivity: [HourlyActivity]
     let expensiveTurns: [ExpensiveTurn]
     let limitPressure: [AnalyticsLimitPressure]
+    let usageAuditSummary: AnalyticsUsageAuditSummary
+    let usageAuditEntries: [AnalyticsUsageAuditEntry]
+    let usageAuditTimeline: [AnalyticsUsageAuditPoint]
     let alerts: [AnalyticsAlert]
     let dataQuality: AnalyticsDataQuality
 
@@ -203,6 +266,9 @@ struct AnalyticsSnapshot: Equatable, Sendable {
             hourlyActivity: [],
             expensiveTurns: [],
             limitPressure: [],
+            usageAuditSummary: .empty,
+            usageAuditEntries: [],
+            usageAuditTimeline: [],
             alerts: [],
             dataQuality: AnalyticsDataQuality(
                 confidence: .high,

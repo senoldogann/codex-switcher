@@ -205,4 +205,160 @@ struct AnalyticsEngineTests {
         #expect(snapshot.limitPressure.first?.profileId == profileA.id)
         #expect(snapshot.limitPressure.contains(where: { $0.profileId == profileB.id && $0.confidence == .low }))
     }
+
+    @Test
+    func snapshotFlagsUnattributedDrainWhenProviderDropsWithoutLocalUsage() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let auditSamples: [UUID: [RateLimitAuditSample]] = [
+            profile.id: [
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-3 * 3600),
+                    weeklyRemainingPercent: 82,
+                    fiveHourRemainingPercent: 100,
+                    limitReached: false
+                ),
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-2 * 3600),
+                    weeklyRemainingPercent: 71,
+                    fiveHourRemainingPercent: 100,
+                    limitReached: false
+                )
+            ]
+        ]
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: auditSamples,
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try! #require(snapshot.usageAuditEntries.first)
+        #expect(entry.status == .unattributed)
+        #expect(entry.idleWindow == true)
+        #expect(entry.weeklyDropPercent == 11)
+        #expect(entry.localTokens == 0)
+        #expect(snapshot.usageAuditSummary.idleDrainCount == 1)
+        #expect(snapshot.usageAuditSummary.unattributedCount == 1)
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }))
+    }
+
+    @Test
+    func snapshotMarksDrainAsExplainedWhenLocalUsageExistsInWindow() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let records = [
+            AnalyticsUsageRecord(
+                timestamp: now.addingTimeInterval(-90 * 60),
+                profileId: profile.id,
+                projectPath: "/tmp/current",
+                projectName: "current",
+                sessionId: "s-1",
+                model: "gpt-5",
+                inputTokens: 6_000,
+                cachedInputTokens: 0,
+                outputTokens: 1_000
+            )
+        ]
+
+        let auditSamples: [UUID: [RateLimitAuditSample]] = [
+            profile.id: [
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-2 * 3600),
+                    weeklyRemainingPercent: 82,
+                    fiveHourRemainingPercent: 100,
+                    limitReached: false
+                ),
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-60 * 60),
+                    weeklyRemainingPercent: 76,
+                    fiveHourRemainingPercent: 94,
+                    limitReached: false
+                )
+            ]
+        ]
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: records,
+            auditSamples: auditSamples,
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try! #require(snapshot.usageAuditEntries.first)
+        #expect(entry.status == .explained)
+        #expect(entry.idleWindow == false)
+        #expect(entry.localTokens == 7_000)
+        #expect(snapshot.usageAuditSummary.explainedCount == 1)
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
+    }
+
+    @Test
+    func snapshotBuildsUsageAuditTimelineFromDrainEvents() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let records = [
+            AnalyticsUsageRecord(
+                timestamp: now.addingTimeInterval(-2.5 * 3600),
+                profileId: profile.id,
+                projectPath: "/tmp/current",
+                projectName: "current",
+                sessionId: "s-1",
+                model: "gpt-5",
+                inputTokens: 4_000,
+                cachedInputTokens: 0,
+                outputTokens: 800
+            )
+        ]
+
+        let auditSamples: [UUID: [RateLimitAuditSample]] = [
+            profile.id: [
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-4 * 3600),
+                    weeklyRemainingPercent: 95,
+                    fiveHourRemainingPercent: 100,
+                    limitReached: false
+                ),
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-3 * 3600),
+                    weeklyRemainingPercent: 89,
+                    fiveHourRemainingPercent: 100,
+                    limitReached: false
+                ),
+                RateLimitAuditSample(
+                    timestamp: now.addingTimeInterval(-2 * 3600),
+                    weeklyRemainingPercent: 84,
+                    fiveHourRemainingPercent: 96,
+                    limitReached: false
+                )
+            ]
+        ]
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: records,
+            auditSamples: auditSamples,
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.usageAuditTimeline.count == 2)
+        #expect(snapshot.usageAuditTimeline.map(\.weeklyDropPercent) == [6, 5])
+        #expect(snapshot.usageAuditTimeline.map(\.idleWindow) == [true, false])
+    }
 }

@@ -23,6 +23,7 @@ struct AnalyticsEngine: Sendable {
         usageRecords: [AnalyticsUsageRecord],
         dailyUsageByProfile: [UUID: [DailyUsage]] = [:],
         sessionRecords: [AnalyticsSessionRecord] = [],
+        auditSamples: [UUID: [RateLimitAuditSample]] = [:],
         rateLimits: [UUID: RateLimitInfo],
         rateLimitHealth: [UUID: RateLimitHealthStatus],
         forecasts: [UUID: RateLimitForecast]
@@ -63,12 +64,21 @@ struct AnalyticsEngine: Sendable {
             rateLimitHealth: rateLimitHealth,
             forecasts: forecasts
         )
+        let usageAuditEntries = makeUsageAuditEntries(
+            range: range,
+            profiles: profiles,
+            records: filteredRecords,
+            auditSamples: auditSamples
+        )
+        let usageAuditSummary = makeUsageAuditSummary(entries: usageAuditEntries)
+        let usageAuditTimeline = makeUsageAuditTimeline(entries: usageAuditEntries)
         let dataQuality = makeDataQuality(health: rateLimitHealth)
         let alerts = makeAlerts(
             filteredRecords: filteredRecords,
             totalCost: totalCost,
             projectBreakdown: projectBreakdown,
             limitPressure: limitPressure,
+            usageAuditEntries: usageAuditEntries,
             dataQuality: dataQuality,
             now: generatedAt
         )
@@ -99,6 +109,9 @@ struct AnalyticsEngine: Sendable {
             hourlyActivity: insights.hourlyActivity,
             expensiveTurns: insights.expensiveTurns,
             limitPressure: limitPressure,
+            usageAuditSummary: usageAuditSummary,
+            usageAuditEntries: usageAuditEntries,
+            usageAuditTimeline: usageAuditTimeline,
             alerts: alerts,
             dataQuality: dataQuality
         )
@@ -380,11 +393,114 @@ struct AnalyticsEngine: Sendable {
         )
     }
 
+    private func makeUsageAuditEntries(
+        range: AnalyticsTimeRange,
+        profiles: [Profile],
+        records: [AnalyticsUsageRecord],
+        auditSamples: [UUID: [RateLimitAuditSample]]
+    ) -> [AnalyticsUsageAuditEntry] {
+        let cutoff = range.cutoffDate(from: now())
+        let profileNames = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0.displayName) })
+        var entries: [AnalyticsUsageAuditEntry] = []
+
+        for (profileId, samples) in auditSamples {
+            let sortedSamples = samples.sorted { $0.timestamp < $1.timestamp }
+            guard sortedSamples.count >= 2 else { continue }
+
+            for index in 1..<sortedSamples.count {
+                let previous = sortedSamples[index - 1]
+                let current = sortedSamples[index]
+
+                if let cutoff, current.timestamp <= cutoff { continue }
+
+                let weeklyDrop = max(0, (previous.weeklyRemainingPercent ?? 0) - (current.weeklyRemainingPercent ?? 0))
+                let fiveHourDrop = max(0, (previous.fiveHourRemainingPercent ?? 0) - (current.fiveHourRemainingPercent ?? 0))
+                let becameExhausted = previous.limitReached == false && current.limitReached == true
+                let hasMeaningfulDrain = weeklyDrop >= 1 || fiveHourDrop >= 5 || becameExhausted
+                guard hasMeaningfulDrain else { continue }
+
+                let intervalRecords = records.filter {
+                    $0.profileId == profileId &&
+                    $0.timestamp > previous.timestamp &&
+                    $0.timestamp <= current.timestamp
+                }
+                let localTokens = intervalRecords.reduce(0) { $0 + $1.totalTokens }
+                let localSessionCount = Set(intervalRecords.map(\.sessionId)).count
+
+                let status: AnalyticsUsageAuditStatus
+                if localTokens == 0 {
+                    status = .unattributed
+                } else if localTokens < 2_000 && (weeklyDrop >= 5 || fiveHourDrop >= 15 || becameExhausted) {
+                    status = .weakAttribution
+                } else {
+                    status = .explained
+                }
+
+                entries.append(
+                    AnalyticsUsageAuditEntry(
+                        profileId: profileId,
+                        profileName: profileNames[profileId] ?? L("Bilinmiyor", "Unknown"),
+                        windowStart: previous.timestamp,
+                        windowEnd: current.timestamp,
+                        weeklyDropPercent: weeklyDrop,
+                        fiveHourDropPercent: fiveHourDrop,
+                        localTokens: localTokens,
+                        localSessionCount: localSessionCount,
+                        idleWindow: localTokens == 0 && localSessionCount == 0,
+                        status: status
+                    )
+                )
+            }
+        }
+
+        return entries.sorted { lhs, rhs in
+            if lhs.windowEnd == rhs.windowEnd {
+                return auditStatusRank(lhs.status) > auditStatusRank(rhs.status)
+            }
+            return lhs.windowEnd > rhs.windowEnd
+        }
+    }
+
+    private func makeUsageAuditSummary(entries: [AnalyticsUsageAuditEntry]) -> AnalyticsUsageAuditSummary {
+        AnalyticsUsageAuditSummary(
+            explainedCount: entries.filter { $0.status == .explained }.count,
+            weakAttributionCount: entries.filter { $0.status == .weakAttribution }.count,
+            unattributedCount: entries.filter { $0.status == .unattributed }.count,
+            idleDrainCount: entries.filter { $0.idleWindow }.count,
+            totalDrainEvents: entries.count,
+            latestEventAt: entries.first?.windowEnd
+        )
+    }
+
+    private func makeUsageAuditTimeline(entries: [AnalyticsUsageAuditEntry]) -> [AnalyticsUsageAuditPoint] {
+        entries
+            .sorted { $0.windowEnd < $1.windowEnd }
+            .map { entry in
+                AnalyticsUsageAuditPoint(
+                    timestamp: entry.windowEnd,
+                    weeklyDropPercent: entry.weeklyDropPercent,
+                    fiveHourDropPercent: entry.fiveHourDropPercent,
+                    localTokens: entry.localTokens,
+                    idleWindow: entry.idleWindow,
+                    status: entry.status
+                )
+            }
+    }
+
+    private func auditStatusRank(_ status: AnalyticsUsageAuditStatus) -> Int {
+        switch status {
+        case .unattributed: return 3
+        case .weakAttribution: return 2
+        case .explained: return 1
+        }
+    }
+
     private func makeAlerts(
         filteredRecords: [AnalyticsUsageRecord],
         totalCost: Double,
         projectBreakdown: [AnalyticsBreakdownItem],
         limitPressure: [AnalyticsLimitPressure],
+        usageAuditEntries: [AnalyticsUsageAuditEntry],
         dataQuality: AnalyticsDataQuality,
         now: Date
     ) -> [AnalyticsAlert] {
@@ -487,6 +603,39 @@ struct AnalyticsEngine: Sendable {
                     message: L(
                         "\(pressured.profileName) için baskı yükseliyor. \(detail)",
                         "\(pressured.profileName) shows elevated pressure. \(detail)"
+                    )
+                )
+            )
+        }
+
+        if let suspiciousDrain = usageAuditEntries.first(where: { $0.status == .unattributed }) {
+            alerts.append(
+                AnalyticsAlert(
+                    kind: .unattributedDrain,
+                    severity: .critical,
+                    title: suspiciousDrain.idleWindow
+                        ? L("Idle limit düşüşü", "Idle limit drain")
+                        : L("Açıklanamayan limit düşüşü", "Unattributed limit drain"),
+                    message: suspiciousDrain.idleWindow
+                        ? L(
+                            "\(suspiciousDrain.profileName) için hiçbir local activity görünmeden haftalık kapasite %\(suspiciousDrain.weeklyDropPercent) düştü.",
+                            "\(suspiciousDrain.profileName) lost \(suspiciousDrain.weeklyDropPercent)% weekly capacity while the app observed no local activity."
+                        )
+                        : L(
+                            "\(suspiciousDrain.profileName) için local usage görünmeden haftalık kapasite %\(suspiciousDrain.weeklyDropPercent) düştü.",
+                            "\(suspiciousDrain.profileName) lost \(suspiciousDrain.weeklyDropPercent)% weekly capacity with no local usage recorded."
+                        )
+                )
+            )
+        } else if let weakDrain = usageAuditEntries.first(where: { $0.status == .weakAttribution }) {
+            alerts.append(
+                AnalyticsAlert(
+                    kind: .unattributedDrain,
+                    severity: .warning,
+                    title: L("Zayıf attribution tespit edildi", "Weak attribution detected"),
+                    message: L(
+                        "\(weakDrain.profileName) için limit düşüşü local activity ile tam açıklanamıyor.",
+                        "\(weakDrain.profileName) shows a limit drop that local activity does not fully explain."
                     )
                 )
             )

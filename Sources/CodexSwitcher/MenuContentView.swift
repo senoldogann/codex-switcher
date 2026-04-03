@@ -206,8 +206,6 @@ struct MenuContentView: View {
             analyticsRangeBar
 
             switchReliabilitySummary
-            automationConfidenceCard
-            accountReliabilityStrip
 
             Divider().background(gw.opacity(0.06))
 
@@ -324,88 +322,6 @@ struct MenuContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
-    }
-
-    private var automationConfidenceCard: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(automationConfidenceColor.opacity(0.12))
-                    .frame(width: 28, height: 28)
-                Image(systemName: automationConfidenceIcon)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(automationConfidenceColor.opacity(0.82))
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(Str.automationConfidence)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(gw.opacity(0.72))
-                    Text(automationConfidenceLabel)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(automationConfidenceColor.opacity(0.82))
-                }
-
-                Text(store.automationConfidence.highlight)
-                    .font(.system(size: 9))
-                    .foregroundStyle(gw.opacity(0.32))
-                    .lineLimit(2)
-
-                HStack(spacing: 8) {
-                    metricCapsule(label: Str.stale, value: "\(store.automationConfidence.staleProfileCount)")
-                    metricCapsule(label: Str.fallback, value: "\(store.automationConfidence.fallbackRestartCount)")
-                    metricCapsule(label: Str.seamless, value: "\(store.automationConfidence.seamlessSuccessCount)")
-                    if let lastVerifiedSwitchAt = store.automationConfidence.lastVerifiedSwitchAt {
-                        metricCapsule(label: Str.lastVerified, value: relativeShort(lastVerifiedSwitchAt))
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 8)
-    }
-
-    private var accountReliabilityStrip: some View {
-        Group {
-            if !store.accountReliability.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(Str.accountsNeedingAttention)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(gw.opacity(0.28))
-                            .textCase(.uppercase)
-                        Spacer()
-                    }
-
-                    ForEach(Array(store.accountReliability.prefix(3))) { summary in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(accountReliabilityColor(summary.status).opacity(0.85))
-                                .frame(width: 6, height: 6)
-                            Text(summary.profileName)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(gw.opacity(0.68))
-                                .lineLimit(1)
-                            Text(summary.detail)
-                                .font(.system(size: 9))
-                                .foregroundStyle(gw.opacity(0.28))
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            if let riskLabel = summary.riskLabel {
-                                Text(riskLabel)
-                                    .font(.system(size: 8, weight: .medium))
-                                    .foregroundStyle(accountReliabilityColor(summary.status).opacity(0.7))
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-            }
-        }
     }
 
     private func iconTab(_ icon: String, _ label: String, _ selected: Bool, action: @escaping () -> Void) -> some View {

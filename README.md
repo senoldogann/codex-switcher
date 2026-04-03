@@ -7,7 +7,19 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
-  <img src="assets/screenshot.png" width="320" alt="CodexSwitcher showing multiple accounts with weekly/5-hour rate limit bars, token usage, cost, and the active account indicator">
+  <img src="assets/readme/analytics-window.png" width="1100" alt="CodexSwitcher analytics window with summary cards, token and cost trends, breakdowns, limit pressure, and alerts">
+</p>
+
+<p align="center">
+  <img src="assets/readme/accounts-overview.png" width="31%" alt="Accounts overview with weekly and 5-hour rate limit bars, token usage, and cost">
+  <img src="assets/readme/chart-view.png" width="31%" alt="Chart view showing token usage trends by account">
+  <img src="assets/readme/projects-view.png" width="31%" alt="Projects view with per-project token and cost breakdown">
+</p>
+
+<p align="center">
+  <img src="assets/readme/sessions-view.png" width="31%" alt="Sessions view with searchable threaded Codex session history">
+  <img src="assets/readme/heatmap-view.png" width="31%" alt="Heatmap view showing the busiest coding hours across the week">
+  <img src="assets/readme/top-dollar-view.png" width="31%" alt="Top dollar view ranking the most expensive prompts by cost">
 </p>
 
 ---
@@ -139,6 +151,14 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ---
 
 ## Changelog
+
+### v2.1.2
+- **Trust-first analytics** — Per-account confidence wording now reflects fetch health instead of implying provider correctness
+- **Usage audit layer** — Consecutive rate-limit snapshots are compared against local usage records to flag explained, weak, and unattributed drain events
+- **Idle drain detection** — The analytics window now calls out limit drops that happen while no local Codex activity is observed
+- **Drain timeline** — Added a compact timeline so suspicious provider-side capacity drops can be inspected over time
+- **History declutter** — Removed the large automation confidence and attention blocks from History so the analytics window owns detailed diagnostics
+- **Analytics regression coverage** — Added targeted tests for unattributed drain, explained drain, idle windows, and audit timeline generation
 
 ### v2.1.1
 - **Left rail navigation** — Reworked the menu actions into a compact vertical sidebar while preserving the existing glass styling
