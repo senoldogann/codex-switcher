@@ -476,6 +476,70 @@ struct AnalyticsEngineTests {
     }
 
     @Test
+    func snapshotDerivesLegacyUsageAuditFromReconciliationEntriesOnly() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let records = [
+            AnalyticsUsageRecord(
+                timestamp: now.addingTimeInterval(-90 * 60),
+                profileId: profile.id,
+                projectPath: "/tmp/current",
+                projectName: "current",
+                sessionId: "s-1",
+                model: "gpt-5",
+                inputTokens: 6_000,
+                cachedInputTokens: 0,
+                outputTokens: 1_000
+            )
+        ]
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: records,
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3 * 3600),
+                        weeklyRemainingPercent: 96,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-2 * 3600),
+                        weeklyRemainingPercent: 89,
+                        fiveHourRemainingPercent: 94,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-1 * 3600),
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.reconciliationEntries.count == 2)
+        #expect(snapshot.reconciliationEntries.map(\.status) == [.ignored, .unexplained])
+        #expect(snapshot.usageAuditEntries.count == 1)
+
+        let legacyEntry = try #require(snapshot.usageAuditEntries.first)
+        #expect(legacyEntry.status == .unattributed)
+        #expect(legacyEntry.weeklyDropPercent == 7)
+        #expect(legacyEntry.fiveHourDropPercent == 6)
+        #expect(snapshot.usageAuditSummary.unattributedCount == 1)
+        #expect(snapshot.usageAuditSummary.totalDrainEvents == 1)
+        #expect(snapshot.usageAuditTimeline.count == 1)
+    }
+
+    @Test
     func snapshotEmitsUnexplainedDrainAlertFromReconciliationLedger() throws {
         let now = Date(timeIntervalSince1970: 1_760_000_000)
         let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)

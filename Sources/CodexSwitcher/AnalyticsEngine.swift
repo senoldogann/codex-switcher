@@ -404,80 +404,6 @@ struct AnalyticsEngine: Sendable {
         )
     }
 
-    private func makeUsageAuditEntries(
-        range: AnalyticsTimeRange,
-        profiles: [Profile],
-        records: [AnalyticsUsageRecord],
-        auditSamples: [UUID: [RateLimitAuditSample]]
-    ) -> [AnalyticsUsageAuditEntry] {
-        let cutoff = range.cutoffDate(from: now())
-        let profileNames = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0.displayName) })
-        var entries: [AnalyticsUsageAuditEntry] = []
-
-        for (profileId, samples) in auditSamples {
-            let sortedSamples = samples.sorted { $0.timestamp < $1.timestamp }
-            guard sortedSamples.count >= 2 else { continue }
-
-            for index in 1..<sortedSamples.count {
-                let previous = sortedSamples[index - 1]
-                let current = sortedSamples[index]
-
-                if let cutoff, current.timestamp <= cutoff { continue }
-
-                let weeklyDrop = makeDrop(
-                    previous: previous.weeklyRemainingPercent,
-                    current: current.weeklyRemainingPercent
-                )
-                let fiveHourDrop = makeDrop(
-                    previous: previous.fiveHourRemainingPercent,
-                    current: current.fiveHourRemainingPercent
-                )
-                let becameExhausted = previous.limitReached == false && current.limitReached == true
-                let hasMeaningfulDrain = weeklyDrop >= 1 || fiveHourDrop >= 5 || becameExhausted
-                guard hasMeaningfulDrain else { continue }
-
-                let intervalRecords = records.filter {
-                    $0.profileId == profileId &&
-                    $0.timestamp > previous.timestamp &&
-                    $0.timestamp <= current.timestamp
-                }
-                let localTokens = intervalRecords.reduce(0) { $0 + $1.totalTokens }
-                let localSessionCount = Set(intervalRecords.map(\.sessionId)).count
-
-                let status: AnalyticsUsageAuditStatus
-                if localTokens == 0 {
-                    status = .unattributed
-                } else if localTokens < 2_000 && (weeklyDrop >= 5 || fiveHourDrop >= 15 || becameExhausted) {
-                    status = .weakAttribution
-                } else {
-                    status = .explained
-                }
-
-                entries.append(
-                    AnalyticsUsageAuditEntry(
-                        profileId: profileId,
-                        profileName: profileNames[profileId] ?? L("Bilinmiyor", "Unknown"),
-                        windowStart: previous.timestamp,
-                        windowEnd: current.timestamp,
-                        weeklyDropPercent: weeklyDrop,
-                        fiveHourDropPercent: fiveHourDrop,
-                        localTokens: localTokens,
-                        localSessionCount: localSessionCount,
-                        idleWindow: localTokens == 0 && localSessionCount == 0,
-                        status: status
-                    )
-                )
-            }
-        }
-
-        return entries.sorted { lhs, rhs in
-            if lhs.windowEnd == rhs.windowEnd {
-                return auditStatusRank(lhs.status) > auditStatusRank(rhs.status)
-            }
-            return lhs.windowEnd > rhs.windowEnd
-        }
-    }
-
     private func makeUsageAuditSummary(entries: [AnalyticsUsageAuditEntry]) -> AnalyticsUsageAuditSummary {
         AnalyticsUsageAuditSummary(
             explainedCount: entries.filter { $0.status == .explained }.count,
@@ -487,11 +413,6 @@ struct AnalyticsEngine: Sendable {
             totalDrainEvents: entries.count,
             latestEventAt: entries.first?.windowEnd
         )
-    }
-
-    private func makeDrop(previous: Int?, current: Int?) -> Int {
-        guard let previous, let current else { return 0 }
-        return max(0, previous - current)
     }
 
     private func makeUsageAuditTimeline(entries: [AnalyticsUsageAuditEntry]) -> [AnalyticsUsageAuditPoint] {
@@ -507,14 +428,6 @@ struct AnalyticsEngine: Sendable {
                     status: entry.status
                 )
             }
-    }
-
-    private func auditStatusRank(_ status: AnalyticsUsageAuditStatus) -> Int {
-        switch status {
-        case .unattributed: return 3
-        case .weakAttribution: return 2
-        case .explained: return 1
-        }
     }
 
     private func makeAlerts(
