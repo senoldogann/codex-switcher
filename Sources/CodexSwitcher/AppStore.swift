@@ -25,8 +25,8 @@ final class AppStore: ObservableObject {
     @Published var rateLimitHealth: [UUID: RateLimitHealthStatus] = [:]
     @Published var costs: [UUID: Double] = [:]
     @Published var forecasts: [UUID: RateLimitForecast] = [:]
-    @Published var lastKnownLimitState: [UUID: Bool] = [:]  // track for restored notifications
-    @Published var isSessionActive: Bool = false  // live session indicator
+    @Published var lastKnownLimitState: [UUID: Bool] = [:]
+    @Published var isSessionActive: Bool = false
 
     @Published var updateStatus: UpdateStatusSnapshot = .idle(currentVersion: UpdateChecker.currentVersion())
     @Published var analyticsTimeRange: AnalyticsTimeRange = .sevenDays
@@ -39,12 +39,89 @@ final class AppStore: ObservableObject {
     @Published var automationConfidence: AutomationConfidenceSummary = .empty
     @Published var accountReliability: [AccountReliabilitySummary] = []
 
-    private var lastBudgetAlertDate: Date?
-    private var lastWeeklySummaryDate: Date?
+    // Stored properties — internal so extension files can access them
+    var lastBudgetAlertDate: Date?
+    var lastWeeklySummaryDate: Date?
 
     var availableUpdate: UpdateReleaseInfo? {
         updateStatus.state == .updateAvailable ? updateStatus.release : nil
     }
+
+    static let turnsLimit    = 50
+    static let switchCooldown: TimeInterval = 60
+
+    let profileManager    = ProfileManager()
+    let usageMonitor      = UsageMonitor()
+    let usageTracker      = SessionUsageTracker()
+    let fetcher           = RateLimitFetcher()
+    let historyStore      = SwitchHistoryStore()
+    let switchTimelineStore = SwitchTimelineStore()
+    let tokenParser       = SessionTokenParser()
+    let analyticsEngine   = AnalyticsEngine()
+    let switchDecisionPolicy = SwitchDecisionPolicy()
+
+    var usageTimer: Timer?
+    var rateLimitTimer: Timer?
+    var automationHealthTimer: Timer?
+    var authWatcher: DispatchSourceFileSystemObject?
+    var authWatcherFd: Int32 = -1
+    var loginTimeout: DispatchWorkItem?
+    var loginProcess: Process?
+    var loginOutputPipe: Pipe?
+    var loginOutputBuffer = ""
+    var didOpenLoginBrowser = false
+    var suppressLoginFailureFeedback = false
+    var lastAutoSwitchDate: Date?
+    var rateLimitCheckPending = false
+    var lastAuthWriteDate: Date?
+    var consecutiveFetchFailures: Int = 0
+    var paceHistory: [SessionPacePoint] = []
+    var tokenRefreshWork: DispatchWorkItem?
+    var isTokenRefreshRunning = false
+    var shouldRefreshTokenUsageAfterCurrentRun = false
+    var warned80PercentIds: Set<UUID> = []
+    var reloginTargetId: UUID?
+    var sessionActivitySequence = 0
+    var switchOrchestrator = SwitchOrchestrator()
+    var seamlessVerificationWork: DispatchWorkItem?
+    var syncedTimelineEventCount = 0
+    var lastAutomationAlertFingerprint: String?
+    var analyticsWindow: NSWindow?
+    var addAccountWindow: NSWindow?
+    var rateLimitAuditSamples: [UUID: [RateLimitAuditSample]] = [:]
+
+    enum AddingStep { case idle, waitingLogin, confirmProfile, done }
+
+    // MARK: - Init
+
+    private init() {
+        profileManager.bootstrap()
+        let recoveryResult = profileManager.verifyAndRecoverActiveAuth()
+        if recoveryResult == .unrecoverable { }
+        loadProfiles()
+        switchHistory = historyStore.load()
+        switchTimeline = switchTimelineStore.load()
+        refreshReliabilityAnalytics()
+        requestNotificationPermission()
+
+        usageMonitor.onRateLimit = { [weak self] in
+            Task { @MainActor in self?.handleRateLimitDetected() }
+        }
+        usageMonitor.onTokenUpdate = { [weak self] in
+            self?.scheduleTokenRefresh()
+        }
+        usageMonitor.onSessionActivity = { [weak self] in
+            Task { @MainActor in self?.recordSessionActivity() }
+        }
+        usageMonitor.start()
+        startUsagePolling()
+        startRateLimitPolling()
+        startAutomationHealthPolling()
+        refreshTokenUsage()
+        syncSwitchOrchestrationState()
+    }
+
+    // MARK: - Update Checker
 
     func checkForUpdates() {
         Task {
@@ -68,8 +145,6 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Called when the user manually taps the Update button.
-    /// Checks for updates and always opens the releases page (shows feedback even when up to date).
     func checkForUpdatesManually() {
         Task {
             let prior = updateStatus
@@ -84,7 +159,6 @@ final class AppStore: ObservableObject {
             let snapshot = await UpdateChecker.check()
             await MainActor.run {
                 self.updateStatus = snapshot
-                // Always open releases page so the user sees something happened
                 self.openReleasePage()
             }
         }
@@ -96,397 +170,6 @@ final class AppStore: ObservableObject {
         } else {
             NSWorkspace.shared.open(URL(string: "https://github.com/senoldogann/codex-switcher/releases")!)
         }
-    }
-
-    static let turnsLimit = 50
-    static let switchCooldown: TimeInterval = 60   // otomatik geçiş arası min süre (sn)
-
-    private let profileManager = ProfileManager()
-    private let usageMonitor = UsageMonitor()
-    private let usageTracker = SessionUsageTracker()
-    private let fetcher = RateLimitFetcher()
-    private let historyStore = SwitchHistoryStore()
-    private let switchTimelineStore = SwitchTimelineStore()
-    private let tokenParser = SessionTokenParser()
-    private let analyticsEngine = AnalyticsEngine()
-    private let switchDecisionPolicy = SwitchDecisionPolicy()
-    private var usageTimer: Timer?
-    private var rateLimitTimer: Timer?
-    private var automationHealthTimer: Timer?
-    private var authWatcher: DispatchSourceFileSystemObject?
-    private var authWatcherFd: Int32 = -1
-    private var loginTimeout: DispatchWorkItem?
-    private var loginProcess: Process?
-    private var loginOutputPipe: Pipe?
-    private var loginOutputBuffer = ""
-    private var didOpenLoginBrowser = false
-    private var suppressLoginFailureFeedback = false
-    private var lastAutoSwitchDate: Date?
-    private var rateLimitCheckPending = false
-    private var lastAuthWriteDate: Date?
-    private var consecutiveFetchFailures: Int = 0
-    private var paceHistory: [SessionPacePoint] = []
-    private var tokenRefreshWork: DispatchWorkItem?
-    private var isTokenRefreshRunning = false
-    private var shouldRefreshTokenUsageAfterCurrentRun = false
-    private var warned80PercentIds: Set<UUID> = []
-    private var reloginTargetId: UUID? = nil
-    private var sessionActivitySequence = 0
-    private var switchOrchestrator = SwitchOrchestrator()
-    private var seamlessVerificationWork: DispatchWorkItem?
-    private var syncedTimelineEventCount = 0
-    private var lastAutomationAlertFingerprint: String?
-    private var analyticsWindow: NSWindow?
-    private var rateLimitAuditSamples: [UUID: [RateLimitAuditSample]] = [:]
-
-    enum AddingStep { case idle, waitingLogin, confirmProfile, done }
-
-    // MARK: - Init
-
-    private init() {
-        profileManager.bootstrap()
-        let recoveryResult = profileManager.verifyAndRecoverActiveAuth()
-        if recoveryResult == .unrecoverable {
-            // All profiles will show as stale; user needs to re-login
-        }
-        loadProfiles()
-        switchHistory = historyStore.load()
-        switchTimeline = switchTimelineStore.load()
-        refreshReliabilityAnalytics()
-        requestNotificationPermission()
-
-        usageMonitor.onRateLimit = { [weak self] in
-            Task { @MainActor in self?.handleRateLimitDetected() }
-        }
-        usageMonitor.onTokenUpdate = { [weak self] in
-            self?.scheduleTokenRefresh()
-        }
-        usageMonitor.onSessionActivity = { [weak self] in
-            Task { @MainActor in
-                self?.recordSessionActivity()
-            }
-        }
-        usageMonitor.start()
-        startUsagePolling()
-        startRateLimitPolling()
-        startAutomationHealthPolling()
-        refreshTokenUsage()
-        syncSwitchOrchestrationState()
-    }
-
-    // MARK: - Rate Limit Polling
-
-    private func startRateLimitPolling() {
-        // İlk fetch hemen yap (status bar'ın veri göstermesi için)
-        Task { await fetchAllRateLimits(showSpinner: false) }
-        // Arka planda her 5 dakikada sessizce güncelle (60s çok sıktı, pil tüketiyordu)
-        rateLimitTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.fetchAllRateLimits(showSpinner: false) }
-        }
-    }
-
-    private func startAutomationHealthPolling() {
-        automationHealthTimer?.invalidate()
-        automationHealthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshReliabilityAnalytics()
-            }
-        }
-    }
-
-    /// Token refresh'i debounce eder — aktif session'da her yazımda değil, 10s sessizlik sonra çalışır.
-    private func scheduleTokenRefresh() {
-        tokenRefreshWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.refreshTokenUsage() }
-        tokenRefreshWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
-    }
-
-    // MARK: - Rate Limit Fetch (tüm hesaplar için)
-
-    func fetchAllRateLimits(showSpinner: Bool = true) async {
-        if showSpinner { isFetchingLimits = true }
-        defer { if showSpinner { isFetchingLimits = false } }
-
-        let fetcher = self.fetcher
-
-        let activeProfileId = activeProfile?.id
-        let credPairs: [(UUID, AuthCredentials)] = profiles.compactMap { profile in
-            let dict: [String: Any]?
-            if profile.id == activeProfileId,
-               let liveDict = profileManager.readLiveAuthDict() {
-                dict = liveDict
-            } else {
-                dict = profileManager.readAuthDict(for: profile)
-            }
-            guard let dict = dict,
-                  let creds = fetcher.credentials(from: dict) else { return nil }
-            return (profile.id, creds)
-        }
-        var results: [(UUID, FetchResult)] = []
-        await withTaskGroup(of: (UUID, FetchResult).self) { group in
-            for (id, creds) in credPairs {
-                group.addTask {
-                    let result = await fetcher.fetch(credentials: creds)
-                    return (id, result)
-                }
-            }
-            for await pair in group { results.append(pair) }
-        }
-
-        var newStale: Set<UUID> = []
-        var successCount = 0
-        for (id, result) in results {
-            switch result {
-            case .success(let info, let diagnostic):
-                rateLimits[id] = info
-                appendRateLimitAuditSample(for: id, info: info, checkedAt: diagnostic.checkedAt)
-                successCount += 1
-                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
-                rateLimitHealth[id] = RateLimitHealthStatus(
-                    lastCheckedAt: diagnostic.checkedAt,
-                    lastSuccessfulFetchAt: diagnostic.checkedAt,
-                    lastFailedFetchAt: previous.lastFailedFetchAt,
-                    lastHTTPStatusCode: diagnostic.httpStatusCode,
-                    staleReason: nil,
-                    failureSummary: nil
-                )
-                let profileName = profiles.first(where: { $0.id == id })?.displayName ?? L("Hesap", "Account")
-                // Restored notification
-                if lastKnownLimitState[id] == true, info.limitReached == false {
-                    sendNotification(
-                        title: L("Limit sıfırlandı", "Limit reset"),
-                        body: L("\(profileName) kullanıma hazır", "\(profileName) is ready to use again")
-                    )
-                    warned80PercentIds.remove(id) // reset warning for next cycle
-                }
-                lastKnownLimitState[id] = info.limitReached
-                // %80 uyarısı — henüz uyarılmamışsa ve limit dolmamışsa
-                if let used = info.weeklyUsedPercent,
-                   used >= 80, !info.limitReached,
-                   !warned80PercentIds.contains(id) {
-                    warned80PercentIds.insert(id)
-                    sendNotification(
-                        title: L("Limit uyarısı", "Limit warning"),
-                        body: L("\(profileName) haftalık limitinin %\(100 - used)'i kaldı", "\(profileName) has \(100 - used)% weekly limit remaining")
-                    )
-                }
-            case .stale(let diagnostic):
-                newStale.insert(id)
-                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
-                rateLimitHealth[id] = RateLimitHealthStatus(
-                    lastCheckedAt: diagnostic.checkedAt,
-                    lastSuccessfulFetchAt: previous.lastSuccessfulFetchAt,
-                    lastFailedFetchAt: diagnostic.checkedAt,
-                    lastHTTPStatusCode: diagnostic.httpStatusCode,
-                    staleReason: diagnostic.staleReason,
-                    failureSummary: diagnostic.failureSummary
-                )
-            case .failure(let diagnostic):
-                let previous = rateLimitHealth[id] ?? RateLimitHealthStatus()
-                rateLimitHealth[id] = RateLimitHealthStatus(
-                    lastCheckedAt: diagnostic.checkedAt,
-                    lastSuccessfulFetchAt: previous.lastSuccessfulFetchAt,
-                    lastFailedFetchAt: diagnostic.checkedAt,
-                    lastHTTPStatusCode: diagnostic.httpStatusCode,
-                    staleReason: nil,
-                    failureSummary: diagnostic.failureSummary
-                )
-            }
-        }
-
-        // Consecutive failure gating
-        if successCount == 0 && !credPairs.isEmpty {
-            consecutiveFetchFailures += 1
-            if consecutiveFetchFailures >= 3 {
-                // Back off: skip next few polls
-                return
-            }
-        } else {
-            consecutiveFetchFailures = 0
-        }
-
-        staleProfileIds = newStale
-        refreshReliabilityAnalytics()
-        NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
-        evaluateAutomaticSwitchAfterRateLimitRefresh()
-        refreshTokenUsage()
-        // Note: updateCostsAndForecasts is called within refreshTokenUsage after async completion
-    }
-
-    func refreshTokenUsage() {
-        if isTokenRefreshRunning {
-            shouldRefreshTokenUsageAfterCurrentRun = true
-            return
-        }
-        isTokenRefreshRunning = true
-
-        let profiles = self.profiles
-        let history  = self.switchHistory
-        let parser   = self.tokenParser
-        let engine = self.analyticsEngine
-        let activeProfileId = self.activeProfile?.id
-        let range = self.analyticsTimeRange
-        let rateLimits = self.rateLimits
-        let rateLimitHealth = self.rateLimitHealth
-        let paceHistory = self.paceHistory
-        let auditSamples = self.rateLimitAuditSamples
-        DispatchQueue.global(qos: .utility).async {
-            let result   = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
-            let daily    = parser.calculateDaily(profiles: profiles, history: history, activeProfileId: activeProfileId, range: range)
-            let records  = parser.calculateAnalyticsRecords(profiles: profiles, history: history, activeProfileId: activeProfileId)
-            let sessionRecords = parser.calculateSessionRecords(range: range)
-            let (newCosts, newForecasts) = Self.calculateCostsAndForecasts(
-                profiles: profiles,
-                tokenUsage: result,
-                rateLimits: rateLimits,
-                paceHistory: paceHistory
-            )
-            let snapshot = engine.makeSnapshot(
-                range: range,
-                profiles: profiles,
-                usageRecords: records,
-                dailyUsageByProfile: daily,
-                sessionRecords: sessionRecords,
-                auditSamples: auditSamples,
-                rateLimits: rateLimits,
-                rateLimitHealth: rateLimitHealth,
-                forecasts: newForecasts
-            )
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.isTokenRefreshRunning = false
-                let shouldRefreshAgain = self.shouldRefreshTokenUsageAfterCurrentRun
-                self.shouldRefreshTokenUsageAfterCurrentRun = false
-
-                if self.profiles.count == profiles.count {
-                    self.tokenUsage = result
-                    self.analyticsSnapshot = snapshot
-                    self.applyCostsAndForecasts(newCosts: newCosts, newForecasts: newForecasts)
-                }
-
-                if shouldRefreshAgain {
-                    self.refreshTokenUsage()
-                }
-            }
-        }
-    }
-
-    nonisolated private static func calculateCostsAndForecasts(
-        profiles: [Profile],
-        tokenUsage: [UUID: AccountTokenUsage],
-        rateLimits: [UUID: RateLimitInfo],
-        paceHistory: [SessionPacePoint]
-    ) -> ([UUID: Double], [UUID: RateLimitForecast]) {
-        let calculator = CostCalculator()
-        var newCosts: [UUID: Double] = [:]
-        var newForecasts: [UUID: RateLimitForecast] = [:]
-
-        for profile in profiles {
-            if let usage = tokenUsage[profile.id] {
-                newCosts[profile.id] = calculator.cost(for: usage)
-            }
-            newForecasts[profile.id] = RateLimitForecaster.forecast(
-                profileId: profile.id,
-                rateLimit: rateLimits[profile.id],
-                tokenUsage: tokenUsage[profile.id],
-                sessionHistory: paceHistory
-            )
-        }
-
-        return (newCosts, newForecasts)
-    }
-
-    private func applyCostsAndForecasts(newCosts: [UUID: Double], newForecasts: [UUID: RateLimitForecast]) {
-        costs = newCosts
-        forecasts = newForecasts
-        refreshReliabilityAnalytics()
-
-        checkBudget(costs: newCosts)
-        checkWeeklySummary(costs: newCosts)
-
-        // Update pace history
-        let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
-        if totalTokens > 0 {
-            paceHistory.append(SessionPacePoint(timestamp: Date(), cumulativeTokens: totalTokens))
-            // Keep last 24 hours of data points
-            let cutoff = Date().addingTimeInterval(-24 * 3600)
-            paceHistory.removeAll { $0.timestamp < cutoff }
-        }
-    }
-
-    // MARK: - Budget Alert
-
-    private func checkBudget(costs: [UUID: Double]) {
-        let limit = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
-        let total = costs.values.reduce(0, +)
-        let now = Date()
-        guard BudgetAlertPolicy.shouldAlert(
-            totalCost: total,
-            budgetLimit: limit,
-            lastAlertDate: lastBudgetAlertDate,
-            now: now
-        ) else { return }
-        lastBudgetAlertDate = now
-        let spent = String(format: "%.2f", total)
-        let cap   = String(format: "%.2f", limit)
-        sendNotification(
-            title: L("Bütçe aşıldı 💸", "Budget exceeded 💸"),
-            body:  L("Bu hafta $\(spent) harcandı (limit: $\(cap))",
-                     "Spent $\(spent) this week (budget: $\(cap))")
-        )
-    }
-
-    // MARK: - Weekly Summary (Sunday evening)
-
-    private func checkWeeklySummary(costs: [UUID: Double]) {
-        let cal  = Calendar.current
-        let now  = Date()
-        let comps = cal.dateComponents([.weekday, .hour], from: now)
-        // Sunday = weekday 1 in Gregorian; send after 18:00
-        guard comps.weekday == 1, (comps.hour ?? 0) >= 18 else { return }
-        let weekStart = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? now
-        if let last = lastWeeklySummaryDate, last > weekStart { return }
-        lastWeeklySummaryDate = now
-
-        let totalCost   = costs.values.reduce(0, +)
-        let totalTokens = tokenUsage.values.reduce(0) { $0 + $1.totalTokens }
-        let topProject  = analyticsSnapshot.summary.mostExpensiveProjectName ?? "—"
-
-        func fmt(_ n: Int) -> String {
-            n >= 1_000_000 ? String(format: "%.1fM", Double(n)/1_000_000)
-          : n >= 1_000     ? String(format: "%.1fK", Double(n)/1_000)
-          : "\(n)"
-        }
-        sendNotification(
-            title: L("Haftalık Özet 📊", "Weekly Summary 📊"),
-            body:  L("\(fmt(totalTokens)) token · $\(String(format:"%.2f",totalCost)) · \(topProject)",
-                     "\(fmt(totalTokens)) tokens · $\(String(format:"%.2f",totalCost)) · top: \(topProject)")
-        )
-    }
-
-    func getTokenUsage(for profile: Profile) -> AccountTokenUsage? {
-        tokenUsage[profile.id]
-    }
-
-    func rateLimit(for profile: Profile) -> RateLimitInfo? {
-        rateLimits[profile.id]
-    }
-
-    var nextResetInfo: (profileName: String, resetTime: String)? {
-        let exhaustedProfiles = profiles.filter { rateLimits[$0.id]?.limitReached == true }
-        let resetTimes = exhaustedProfiles.compactMap { profile -> (String, Date)? in
-            let rl = rateLimits[profile.id]
-            let candidates = [rl?.weeklyResetAt, rl?.fiveHourResetAt].compactMap { $0 }
-            guard let earliest = candidates.min() else { return nil }
-            return (profile.displayName, earliest)
-        }
-        guard let (name, date) = resetTimes.min(by: { $0.1 < $1.1 }) else { return nil }
-        let fmt = DateFormatter()
-        let calendar = Calendar.current
-        let isToday = calendar.isDateInToday(date)
-        fmt.dateFormat = isToday ? "HH:mm" : "d MMM HH:mm"
-        return (name, fmt.string(from: date))
     }
 
     // MARK: - Usage Polling
@@ -569,14 +252,31 @@ final class AppStore: ObservableObject {
         analyticsWindow = window
     }
 
+    // MARK: - Token / Rate Limit Accessors
+
+    func getTokenUsage(for profile: Profile) -> AccountTokenUsage? { tokenUsage[profile.id] }
+    func rateLimit(for profile: Profile) -> RateLimitInfo? { rateLimits[profile.id] }
+
+    var nextResetInfo: (profileName: String, resetTime: String)? {
+        let exhaustedProfiles = profiles.filter { rateLimits[$0.id]?.limitReached == true }
+        let resetTimes = exhaustedProfiles.compactMap { profile -> (String, Date)? in
+            let rl = rateLimits[profile.id]
+            let candidates = [rl?.weeklyResetAt, rl?.fiveHourResetAt].compactMap { $0 }
+            guard let earliest = candidates.min() else { return nil }
+            return (profile.displayName, earliest)
+        }
+        guard let (name, date) = resetTimes.min(by: { $0.1 < $1.1 }) else { return nil }
+        let fmt = DateFormatter()
+        let calendar = Calendar.current
+        let isToday = calendar.isDateInToday(date)
+        fmt.dateFormat = isToday ? "HH:mm" : "d MMM HH:mm"
+        return (name, fmt.string(from: date))
+    }
+
     // MARK: - Smart Switch
 
-    /// Rate limit verisine göre en iyi hesabı seçer.
-    /// Auto modda tüm hesaplar tükenirse nil döner → allExhausted tetiklenir.
-    private func smartNextProfile(auto: Bool) -> Profile? {
-        let candidates = profiles.filter {
-            $0.id != activeProfile?.id
-        }
+    func smartNextProfile(auto: Bool) -> Profile? {
+        let candidates = profiles.filter { $0.id != activeProfile?.id }
         guard !candidates.isEmpty else { return nil }
 
         if auto {
@@ -586,7 +286,6 @@ final class AppStore: ObservableObject {
                 rateLimits: rateLimits
             )
         }
-
         return switchDecisionPolicy.nextManualCandidate(
             profiles: profiles,
             activeProfileId: activeProfile?.id,
@@ -619,12 +318,11 @@ final class AppStore: ObservableObject {
         switchTo(profile: profile, reason: L("Manuel seçim", "Manual selection"))
     }
 
-    private func switchTo(profile: Profile, reason: String) {
+    func switchTo(profile: Profile, reason: String) {
         activateCandidate(profile, reason: reason)
     }
 
     private func activateCandidate(_ candidate: Profile, reason: String) {
-        // Switch event'ini kaydet
         let event = SwitchEvent(
             id: UUID(),
             timestamp: Date(),
@@ -638,14 +336,13 @@ final class AppStore: ObservableObject {
         switchHistory = historyStore.load()
 
         do {
-            lastAuthWriteDate = Date() // debounce: prevent authFileChanged from firing
+            lastAuthWriteDate = Date()
             let verifyResult = try profileManager.activate(profile: candidate)
 
             switch verifyResult {
             case .verified:
                 finalizeActivation(candidate, reason: reason)
             case .failed:
-                // One retry: re-read credential source (in case of race with external writer)
                 let retryResult = profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
                 switch retryResult {
                 case .verified:
@@ -669,8 +366,7 @@ final class AppStore: ObservableObject {
                 "No current limit data is available for \(profile.displayName)."
             )
         }
-
-        let weeklyRemaining = max(0, 100 - (rateLimit.weeklyUsedPercent ?? 100))
+        let weeklyRemaining  = max(0, 100 - (rateLimit.weeklyUsedPercent ?? 100))
         let fiveHourRemaining = rateLimit.fiveHourRemainingPercent ?? 0
         return L(
             "\(profile.displayName) güvenli değil. Haftalık kalan %\(weeklyRemaining), 5 saatlik kalan %\(fiveHourRemaining).",
@@ -685,17 +381,14 @@ final class AppStore: ObservableObject {
         }
         config.activeProfileId = candidate.id
         profileManager.saveConfig(config)
-        
-        // Update state atomically
+
         let newActiveProfile = config.profiles.first { $0.id == candidate.id }
         activeProfile = newActiveProfile
         profiles = config.profiles
         allExhausted = false
         activeTurns = 0
-        
-        // Refresh token usage with updated history
+
         refreshTokenUsage()
-        
         notifyProfileChanged()
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
@@ -704,7 +397,7 @@ final class AppStore: ObservableObject {
 
     // MARK: - AI Restart
 
-    private func restartAIIfRunning(for profile: Profile) {
+    func restartAIIfRunning(for profile: Profile) {
         restartCodexIfRunning()
     }
 
@@ -713,10 +406,7 @@ final class AppStore: ObservableObject {
             $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }) else { return }
 
-        // Capture URL before killing — becomes inaccessible after process dies
         let bundleURL = codexApp.bundleURL
-
-        // forceTerminate = SIGKILL, no confirmation dialog, instant
         codexApp.forceTerminate()
 
         sendNotification(
@@ -725,56 +415,14 @@ final class AppStore: ObservableObject {
         )
 
         guard let url = bundleURL else { return }
-        // 1s is enough after force kill (no graceful shutdown to wait for)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
         }
     }
 
-    // MARK: - Rename
-
-    func renameProfile(_ profile: Profile, alias: String) {
-        var config = profileManager.loadConfig()
-        guard let i = config.profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-        config.profiles[i].alias = alias
-        profileManager.saveConfig(config)
-        profiles = config.profiles
-        if activeProfile?.id == profile.id {
-            activeProfile = config.profiles[i]
-            notifyProfileChanged()
-        }
-    }
-
-    func showRenameDialog(for profile: Profile) {
-        let alert = NSAlert()
-        alert.messageText = Str.renameTitle
-        alert.informativeText = profile.email
-        alert.addButton(withTitle: Str.save)
-        alert.addButton(withTitle: Str.cancel)
-
-        // Use Codex icon instead of blank app icon
-        if let url = Bundle.appResources.url(forResource: "codex", withExtension: "icns"),
-           let icon = NSImage(contentsOf: url) {
-            alert.icon = icon
-        }
-
-        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        tf.stringValue = profile.alias
-        tf.placeholderString = profile.email
-        tf.bezelStyle = .roundedBezel
-        alert.accessoryView = tf
-
-        NSApp.activate(ignoringOtherApps: true)
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let newAlias = tf.stringValue.trimmingCharacters(in: .whitespaces)
-            renameProfile(profile, alias: newAlias)
-        }
-    }
+    // MARK: - Rate Limit Detection
 
     func handleRateLimitDetected() {
-        // UsageMonitor keyword tespiti yanlış pozitif olabilir (kod içindeki "rate_limit" stringleri,
-        // geçici per-request 429 hataları vb.). Gerçekten limiti dolduğunu API'den doğrula.
         guard !allExhausted, !rateLimitCheckPending else { return }
         if let last = lastAutoSwitchDate,
            Date().timeIntervalSince(last) < Self.switchCooldown { return }
@@ -789,7 +437,6 @@ final class AppStore: ObservableObject {
             if let rl = rateLimits[activeId] {
                 guard self.switchDecisionPolicy.shouldLeaveCurrentProfile(rl) else { return }
             }
-            // Hesap verisi yoksa (API başarısız) → ihtiyatlı olarak geç
 
             if self.switchOrchestrationState == .verifying {
                 self.handleSeamlessVerificationFailure()
@@ -806,17 +453,13 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func evaluateAutomaticSwitchAfterRateLimitRefresh() {
+    func evaluateAutomaticSwitchAfterRateLimitRefresh() {
         guard !allExhausted,
               let activeId = activeProfile?.id,
               let activeRateLimit = rateLimits[activeId],
-              switchDecisionPolicy.shouldLeaveCurrentProfile(activeRateLimit) else {
-            return
-        }
+              switchDecisionPolicy.shouldLeaveCurrentProfile(activeRateLimit) else { return }
         if let last = lastAutoSwitchDate,
-           Date().timeIntervalSince(last) < Self.switchCooldown {
-            return
-        }
+           Date().timeIntervalSince(last) < Self.switchCooldown { return }
         if switchOrchestrationState == .verifying {
             handleSeamlessVerificationFailure()
             return
@@ -831,650 +474,30 @@ final class AppStore: ObservableObject {
         switchToNext(reason: reason)
     }
 
-    // MARK: - Add Account
-
-    private var addAccountWindow: NSWindow?
-
-    func openAddAccountWindow() {
-        addingStep = .idle
-        isAddingAccount = false
-        addAccountErrorMessage = nil
-        pendingProfileEmail = ""
-        aliasText = ""
-
-        if let w = addAccountWindow, w.isVisible {
-            w.makeKeyAndOrderFront(NSApp)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        let hosting = NSHostingView(rootView: AddAccountView().environmentObject(self))
-        hosting.frame = NSRect(x: 0, y: 0, width: 400, height: 320)
-
-        let window = NSWindow(
-            contentRect: hosting.frame,
-            styleMask: [.titled, .closable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = ""
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
-        window.contentView = hosting
-        window.isReleasedWhenClosed = false
-        let isDark = UserDefaults.standard.object(forKey: "isDarkMode") as? Bool ?? true
-        window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-        window.backgroundColor = isDark
-            ? NSColor.black.withAlphaComponent(0.85)
-            : NSColor.white.withAlphaComponent(0.85)
-        window.center()
-        window.makeKeyAndOrderFront(NSApp)
-        NSApp.activate(ignoringOtherApps: true)
-        addAccountWindow = window
-    }
-
-    func closeAddAccountWindow() { addAccountWindow?.close() }
-
-    func dismissAddAccountFlow(closeWindow: Bool = false) {
-        cancelLoginTimeout()
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-        isAddingAccount = false
-        addingStep = .idle
-        addAccountErrorMessage = nil
-        pendingProfileEmail = ""
-        aliasText = ""
-        stopAuthWatcher()
-        if closeWindow {
-            closeAddAccountWindow()
-        }
-    }
-
-    func beginAddAccount() {
-        addAccountErrorMessage = nil
-        isAddingAccount = true
-        addingStep = .waitingLogin
-
-        watchAuthFileForNewLogin()
-        guard startCodexLogin() else {
-            stopAuthWatcher()
-            return
-        }
-
-        cancelLoginTimeout()
-        let timeout = DispatchWorkItem { [weak self] in self?.loginTimedOut() }
-        loginTimeout = timeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeout)
-    }
-
-    /// Finds a CLI binary using the user's login shell PATH.
-    /// Falls back through common install locations if the shell lookup fails.
-    private func findCLIPath(_ name: String) -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        task.arguments = ["-l", "-c", "which \(name)"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = nil
-        try? task.run()
-        task.waitUntilExit()
-        let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !raw.isEmpty { return raw }
-
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
-            "\(home)/.local/bin/\(name)",
-            "/opt/homebrew/bin/\(name)",
-            "/usr/local/bin/\(name)",
-            "\(home)/.npm-global/bin/\(name)"
-        ]
-        return candidates.first { FileManager.default.fileExists(atPath: $0) }
-            ?? "/usr/local/bin/\(name)"
-    }
-
-    private func cancelLoginTimeout() {
-        loginTimeout?.cancel()
-        loginTimeout = nil
-    }
-
-    private func loginTimedOut() {
-        guard addingStep == .waitingLogin else { return }
-        cancelLoginTimeout()
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-        addingStep = .idle
-        isAddingAccount = false
-        addAccountErrorMessage = L("Login zaman aşımına uğradı. Tekrar deneyin.", "Login timed out. Please try again.")
-        stopAuthWatcher()
-    }
-
-    func confirmPendingProfile(alias: String) {
-        guard let newProfile = profileManager.captureCurrentAuth(alias: alias) else {
-            cancelAddAccount()
-            return
-        }
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-        var config = profileManager.loadConfig()
-        var profile = newProfile
-        let shouldActivate = config.activeProfileId == nil
-        if shouldActivate { profile.activatedAt = Date() }
-        config.profiles.append(profile)
-        if shouldActivate {
-            config.activeProfileId = profile.id
-            _ = try? profileManager.activate(profile: profile)
-            activeProfile = profile
-        }
-        profileManager.saveConfig(config)
-        profiles = config.profiles
-        addingStep = .done
-        isAddingAccount = false
-        addAccountErrorMessage = nil
-        stopAuthWatcher()
-        closeAddAccountWindow()
-        notifyProfileChanged()
-        sendNotification(title: "Hesap eklendi", body: profile.displayName)
-        Task { await fetchAllRateLimits() }
-    }
-
-    func cancelAddAccount() {
-        cancelLoginTimeout()
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-        isAddingAccount = false
-        addingStep = .idle
-        addAccountErrorMessage = nil
-        pendingProfileEmail = ""
-        aliasText = ""
-        stopAuthWatcher()
-        closeAddAccountWindow()
-        if let a = activeProfile { _ = try? profileManager.activate(profile: a) }
-    }
-
-    // MARK: - Statistics Reset
-
-    func resetStatistics() {
-        let alert = NSAlert()
-        alert.messageText = L("İstatistikleri sıfırla?", "Reset statistics?")
-        alert.informativeText = L(
-            "Tüm token ve maliyet geçmişi silinecek. Bu işlem geri alınamaz.",
-            "All token and cost history will be deleted. This cannot be undone.")
-        alert.addButton(withTitle: L("Sıfırla", "Reset"))
-        alert.addButton(withTitle: L("İptal", "Cancel"))
-        alert.alertStyle = .warning
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex-switcher/cache")
-        let filesToDelete = [
-            "event-deltas-v2.json",
-            "token-usage.json.mod",
-            "session-meta-v3.json",
-            "session-meta-v3.mod"
-        ]
-        for name in filesToDelete {
-            try? FileManager.default.removeItem(at: cacheDir.appendingPathComponent(name))
-        }
-
-        tokenUsage     = [:]
-        costs          = [:]
-        forecasts      = [:]
-        analyticsSnapshot = .empty(for: analyticsTimeRange)
-        paceHistory    = []
-        rateLimitAuditSamples = [:]
-        warned80PercentIds = []
-
-        refreshTokenUsage()
-    }
-
-    // MARK: - Re-login for Stale Accounts
-
-    func beginRelogin(for profile: Profile) {
-        reloginTargetId = profile.id
-        watchAuthFileForRelogin()
-        guard startCodexLogin() else {
-            reloginTargetId = nil
-            stopAuthWatcher()
-            return
-        }
-    }
-
-    private func watchAuthFileForRelogin() {
-        stopAuthWatcher()
-        let fd = open(ProfileManager.codexAuthPath.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        authWatcherFd = fd
-        let src = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-        src.setEventHandler { [weak self] in self?.reloginAuthChanged() }
-        src.setCancelHandler { [weak self] in
-            if let self, self.authWatcherFd >= 0 { close(self.authWatcherFd); self.authWatcherFd = -1 }
-        }
-        src.resume()
-        authWatcher = src
-    }
-
-    private func reloginAuthChanged() {
-        guard let targetId = reloginTargetId else { return }
-        if let last = lastAuthWriteDate, Date().timeIntervalSince(last) < 0.5 { return }
-        lastAuthWriteDate = Date()
-
-        guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tokens = dict["tokens"] as? [String: Any],
-              let accessToken = tokens["access_token"] as? String,
-              let newAccountId = profileManager.extractAccountId(from: accessToken) else { return }
-
-        reloginTargetId = nil
-        stopAuthWatcher()
-
-        guard let profile = profiles.first(where: { $0.id == targetId }) else { return }
-
-        if profile.accountId == newAccountId {
-            try? data.write(to: profileManager.authPath(for: profile), options: .atomic)
-            staleProfileIds.remove(targetId)
-            sendNotification(
-                title: L("Giriş yenilendi", "Re-login successful"),
-                body: profile.displayName
-            )
-            Task { await fetchAllRateLimits() }
-        } else {
-            sendNotification(
-                title: L("Hatalı hesap", "Wrong account"),
-                body: L("Farklı bir hesaba giriş yapıldı. Tekrar deneyin.", "A different account was detected. Please try again.")
-            )
-        }
-    }
-
-    func delete(profile: Profile) {
-        profileManager.deleteProfile(profile)
-        rateLimits.removeValue(forKey: profile.id)
-        var config = profileManager.loadConfig()
-        config.profiles.removeAll { $0.id == profile.id }
-        if config.activeProfileId == profile.id {
-            config.activeProfileId = config.profiles.first?.id
-            if let next = config.profiles.first {
-                _ = try? profileManager.activate(profile: next)
-                activeProfile = next
-            } else { activeProfile = nil }
-        }
-        profileManager.saveConfig(config)
-        profiles = config.profiles
-        notifyProfileChanged()
-    }
-
-    // MARK: - Auth Watcher
-
-    private func watchAuthFileForNewLogin() {
-        stopAuthWatcher()
-        let fd = open(ProfileManager.codexAuthPath.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        authWatcherFd = fd
-        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-        src.setEventHandler { [weak self] in self?.authFileChanged() }
-        src.setCancelHandler { [weak self] in
-            if let self, self.authWatcherFd >= 0 { close(self.authWatcherFd); self.authWatcherFd = -1 }
-        }
-        src.resume()
-        authWatcher = src
-    }
-
-    private func authFileChanged() {
-        // Debounce: ignore events within 500ms of our own write or last external event
-        if let last = lastAuthWriteDate, Date().timeIntervalSince(last) < 0.5 { return }
-        lastAuthWriteDate = Date() // reset for rapid external events too
-
-        if isAddingAccount {
-            // Existing add-account flow
-            guard let data = try? Data(contentsOf: ProfileManager.codexAuthPath),
-                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tokens = dict["tokens"] as? [String: Any],
-                  let access = tokens["access_token"] as? String else { return }
-            pendingProfileEmail = profileManager.extractEmail(from: access) ?? "bilinmeyen"
-            addingStep = .confirmProfile
-        } else {
-            // External modification detected — verify
-            Task {
-                let result = profileManager.verifyAndRecoverActiveAuth()
-                if result == .unrecoverable {
-                    sendNotification(
-                        title: L("Auth sorunu", "Auth issue"),
-                        body: L("Auth dosyası bozuldu. Hesapları yeniden giriş yapmanız gerekebilir.", "Auth file corrupted. You may need to re-login to your accounts.")
-                    )
-                }
-            }
-        }
-    }
-
-    private func stopAuthWatcher() { authWatcher?.cancel(); authWatcher = nil }
-
     // MARK: - Helpers
 
-    @discardableResult
-    private func startCodexLogin() -> Bool {
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-
-        let codexPath = findCLIPath("codex")
-        guard FileManager.default.isExecutableFile(atPath: codexPath) else {
-            isAddingAccount = false
-            addingStep = .idle
-            addAccountErrorMessage = L("`codex` komutu bulunamadı.", "`codex` command was not found.")
-            sendNotification(
-                title: L("Login başlatılamadı", "Login could not start"),
-                body: L("`codex` komutu bulunamadı.", "`codex` command was not found.")
-            )
-            return false
-        }
-
-        let command = CodexLoginCommand.shellWrapped(codexPath: codexPath)
-        let pipe = Pipe()
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: command.executablePath)
-        task.arguments = command.arguments
-        task.standardInput = nil
-        task.standardOutput = pipe
-        task.standardError = pipe
-
-        loginOutputPipe = pipe
-        loginOutputBuffer = ""
-        didOpenLoginBrowser = false
-        suppressLoginFailureFeedback = false
-
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            DispatchQueue.main.async {
-                self?.handleCodexLoginOutput(data)
-            }
-        }
-
-        task.terminationHandler = { [weak self] process in
-            DispatchQueue.main.async {
-                self?.handleCodexLoginTermination(status: process.terminationStatus)
-            }
-        }
-
-        do {
-            try task.run()
-            loginProcess = task
-            return true
-        } catch {
-            stopCodexLoginProcess(suppressFailureFeedback: true)
-            isAddingAccount = false
-            addingStep = .idle
-            addAccountErrorMessage = error.localizedDescription
-            sendNotification(
-                title: L("Login başlatılamadı", "Login could not start"),
-                body: error.localizedDescription
-            )
-            return false
-        }
-    }
-
-    private func handleCodexLoginOutput(_ data: Data) {
-        guard let chunk = String(data: data, encoding: .utf8), !chunk.isEmpty else { return }
-        loginOutputBuffer += chunk
-
-        guard !didOpenLoginBrowser,
-              CodexLoginOutputParser.authorizationURL(in: loginOutputBuffer) != nil else { return }
-
-        // The Codex CLI already opens the browser window. We only mark that we saw
-        // a valid login URL so the app does not trigger duplicate browser opens.
-        didOpenLoginBrowser = true
-    }
-
-    private func handleCodexLoginTermination(status: Int32) {
-        guard loginProcess != nil else { return }
-        let shouldReportFailure = status != 0 && !suppressLoginFailureFeedback && addingStep == .waitingLogin
-
-        stopCodexLoginProcess(suppressFailureFeedback: true)
-
-        if shouldReportFailure {
-            cancelLoginTimeout()
-            isAddingAccount = false
-            addingStep = .idle
-            stopAuthWatcher()
-            addAccountErrorMessage = L(
-                "Codex login süreci erken kapandı. Tarayıcı bağlantısı üretilemedi.",
-                "Codex login exited early before it could provide a browser link."
-            )
-            sendNotification(
-                title: L("Login başlatılamadı", "Login could not start"),
-                body: L("Codex login süreci erken kapandı. Browser linki üretilemedi.", "Codex login exited early before it could provide a browser link.")
-            )
-        }
-    }
-
-    private func stopCodexLoginProcess(suppressFailureFeedback: Bool) {
-        if suppressFailureFeedback {
-            self.suppressLoginFailureFeedback = true
-        }
-
-        loginOutputPipe?.fileHandleForReading.readabilityHandler = nil
-        loginOutputPipe = nil
-
-        if let process = loginProcess, process.isRunning {
-            process.terminate()
-        }
-
-        loginProcess = nil
-        loginOutputBuffer = ""
-        didOpenLoginBrowser = false
-    }
-
-    private func recordSessionActivity() {
-        sessionActivitySequence += 1
-        let currentSequence = sessionActivitySequence
-        isSessionActive = true
-        scheduleSeamlessVerificationSuccess(sequence: currentSequence)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self, self.sessionActivitySequence == currentSequence else { return }
-            self.isSessionActive = false
-            self.processPendingSwitchIfNeeded(trigger: "session-idle")
-        }
-    }
-
-    private func queuePendingSwitch(reason: String) {
-        guard switchOrchestrator.pendingRequest == nil else { return }
-        guard let candidate = smartNextProfile(auto: true) else {
-            allExhausted = true
-            sendNotification(title: Str.allExhausted, body: L("Limitler sıfırlanınca devam eder.", "Will resume when limits reset."))
-            return
-        }
-
-        let request = PendingSwitchRequest(
-            targetProfileId: candidate.id,
-            targetProfileName: candidate.displayName,
-            reason: reason,
-            queuedAt: Date()
-        )
-        _ = switchOrchestrator.queue(
-            request: request,
-            detail: L("Aktif iş bitene kadar geçiş ertelendi.", "Switch was deferred until the active work finished.")
-        )
-        syncSwitchOrchestrationState()
-    }
-
-    private func processPendingSwitchIfNeeded(trigger: String) {
-        guard let pending = switchOrchestrator.readySwitchIfPossible(
-            isSessionActive: isSessionActive,
-            now: Date()
-        ) else { return }
-        guard let candidate = profiles.first(where: { $0.id == pending.targetProfileId }) else {
-            switchOrchestrator.clearPending()
-            syncSwitchOrchestrationState()
-            return
-        }
-
-        syncSwitchOrchestrationState()
-        switchTo(profile: candidate, reason: "\(pending.reason) · \(trigger)")
-        switchOrchestrator.finishSwitchCycle()
-        syncSwitchOrchestrationState()
-    }
-
-    private func attemptSeamlessSwitch(for candidate: Profile) {
-        guard isCodexRunning() else {
-            switchOrchestrator.markInconclusive(
-                detail: L(
-                    "Codex çalışmıyordu; geçiş yeniden başlatma gerektirmeden tamamlandı.",
-                    "Codex was not running, so the switch completed without needing a restart."
-                )
-            )
-            syncSwitchOrchestrationState()
-            return
-        }
-
-        seamlessVerificationWork?.cancel()
-        switchOrchestrator.recordImmediateRestart(
-            targetProfileName: candidate.displayName,
-            detail: L(
-                "Yeni hesabın aktif kalmasını garanti etmek için Codex yeniden başlatıldı.",
-                "Codex was restarted to guarantee the new account became active."
-            )
-        )
-        syncSwitchOrchestrationState()
-        restartAIIfRunning(for: candidate)
-    }
-
-    private func scheduleSeamlessVerificationSuccess(sequence: Int) {
-        guard switchOrchestrationState == .verifying else { return }
-
-        seamlessVerificationWork?.cancel()
-        let successWork = DispatchWorkItem { [weak self] in
-            guard let self,
-                  self.switchOrchestrationState == .verifying,
-                  self.sessionActivitySequence == sequence,
-                  let activeProfile else { return }
-
-            let verifyResult = self.profileManager.verifyActiveAccount(expectedAccountId: activeProfile.accountId)
-            guard case .verified = verifyResult else { return }
-
-            self.switchOrchestrator.completeSeamlessSuccess(
-                detail: L(
-                    "Yeni oturum aktivitesi gözlendi; geçiş yeniden başlatmasız doğrulandı.",
-                    "New session activity was observed; the switch was verified without restarting."
-                )
-            )
-            self.syncSwitchOrchestrationState()
-        }
-        seamlessVerificationWork = successWork
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: successWork)
-    }
-
-    private func handleSeamlessVerificationFailure() {
-        guard let activeProfile else { return }
-        seamlessVerificationWork?.cancel()
-        switchOrchestrator.recordFallbackRestart(
-            detail: L(
-                "Yeni istek sonrası limit hatası devam etti; yeniden başlatma fallback uygulandı.",
-                "Rate-limit behavior persisted after the switch; restart fallback was applied."
-            )
-        )
-        syncSwitchOrchestrationState()
-        restartAIIfRunning(for: activeProfile)
-    }
-
-    private func isCodexRunning() -> Bool {
-        NSWorkspace.shared.runningApplications.contains {
-            $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
-        }
-    }
-
-    private func syncSwitchOrchestrationState() {
-        switchOrchestrationState = switchOrchestrator.state
-        pendingSwitchRequest = switchOrchestrator.pendingRequest
-        lastSeamlessSwitchResult = switchOrchestrator.lastResult
-        switchReliability = switchOrchestrator.reliability
-
-        let timelineEvents = switchOrchestrator.timelineEvents
-        if timelineEvents.count > syncedTimelineEventCount {
-            let newEvents = Array(timelineEvents.dropFirst(syncedTimelineEventCount))
-            for event in newEvents {
-                switchTimelineStore.append(event)
-            }
-            switchTimeline.append(contentsOf: newEvents)
-            syncedTimelineEventCount = timelineEvents.count
-        }
-        refreshReliabilityAnalytics()
-    }
-
-    private func refreshReliabilityAnalytics(now: Date = Date()) {
-        automationConfidence = AutomationConfidenceCalculator.buildSummary(
-            profiles: profiles,
-            staleProfileIds: staleProfileIds,
-            rateLimitHealth: rateLimitHealth,
-            reliability: switchReliability,
-            pendingSwitchRequest: pendingSwitchRequest,
-            switchTimeline: switchTimeline,
-            now: now
-        )
-        accountReliability = AutomationConfidenceCalculator.buildAccountSummaries(
-            profiles: profiles,
-            staleProfileIds: staleProfileIds,
-            rateLimitHealth: rateLimitHealth,
-            forecasts: forecasts,
-            costs: costs,
-            now: now
-        )
-        emitAutomationAlertIfNeeded()
-    }
-
-    private func appendRateLimitAuditSample(for profileId: UUID, info: RateLimitInfo, checkedAt: Date) {
-        let sample = RateLimitAuditSample(
-            timestamp: checkedAt,
-            weeklyRemainingPercent: info.weeklyRemainingPercent,
-            fiveHourRemainingPercent: info.fiveHourRemainingPercent,
-            limitReached: info.limitReached
-        )
-
-        var samples = rateLimitAuditSamples[profileId] ?? []
-        if let last = samples.last,
-           last.weeklyRemainingPercent == sample.weeklyRemainingPercent,
-           last.fiveHourRemainingPercent == sample.fiveHourRemainingPercent,
-           last.limitReached == sample.limitReached,
-           checkedAt.timeIntervalSince(last.timestamp) < 60 {
-            return
-        }
-        samples.append(sample)
-        if samples.count > 240 {
-            samples.removeFirst(samples.count - 240)
-        }
-        rateLimitAuditSamples[profileId] = samples
-    }
-
-    private func emitAutomationAlertIfNeeded() {
-        guard let alert = AutomationAlertPolicy.nextAlert(
-            summary: automationConfidence,
-            previousFingerprint: lastAutomationAlertFingerprint
-        ) else { return }
-
-        lastAutomationAlertFingerprint = alert.fingerprint
-        sendNotification(title: alert.title, body: alert.body)
-    }
-
-    private func notifyProfileChanged() {
+    func notifyProfileChanged() {
         NotificationCenter.default.post(name: .profileChanged, object: nil)
     }
 
     private func automaticSwitchReason(for rateLimit: RateLimitInfo?) -> String {
         switch switchDecisionPolicy.automaticReasonKind(for: rateLimit) {
-        case .limitReached:
-            return L("Limit doldu", "Limit reached")
-        case .fiveHourPressure:
-            return L("5 saatlik limit kritik seviyede", "5-hour limit is critically low")
-        case .weeklyPressure:
-            return L("Haftalık limit kritik seviyede", "Weekly limit is critically low")
-        case nil:
-            return L("Limit kritik seviyede", "Limit is critically low")
+        case .limitReached:   return L("Limit doldu", "Limit reached")
+        case .fiveHourPressure: return L("5 saatlik limit kritik seviyede", "5-hour limit is critically low")
+        case .weeklyPressure:  return L("Haftalık limit kritik seviyede", "Weekly limit is critically low")
+        case nil:             return L("Limit kritik seviyede", "Limit is critically low")
         }
     }
 
-    private func requestNotificationPermission() {
+    func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    private func sendNotification(title: String, body: String) {
+    func sendNotification(title: String, body: String) {
         let c = UNMutableNotificationContent()
         c.title = title; c.body = body; c.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)
+        )
     }
 }
