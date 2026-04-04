@@ -134,7 +134,9 @@ final class ProfileManager: @unchecked Sendable {
         let email = extractEmail(from: accessToken) ?? "unknown@codex"
         let profile = Profile(id: UUID(), alias: alias, email: email,
                               accountId: accountId, addedAt: Date(), aiProvider: .codex)
-        try? data.write(to: authPath(for: profile), options: .atomic)
+        let dest = authPath(for: profile)
+        try? data.write(to: dest, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
         return profile
     }
 
@@ -157,6 +159,7 @@ final class ProfileManager: @unchecked Sendable {
             .appendingPathComponent(".auth_tmp_\(UUID().uuidString).json")
         do {
             try newData.write(to: tmp, options: [])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
             guard try FileManager.default.replaceItemAt(Self.codexAuthPath, withItemAt: tmp) != nil else {
                 try? FileManager.default.removeItem(at: tmp)
                 throw SwitcherError.activationFailed(profile.email)

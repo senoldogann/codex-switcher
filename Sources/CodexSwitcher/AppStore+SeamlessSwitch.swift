@@ -9,7 +9,6 @@ extension AppStore {
         sessionActivitySequence += 1
         let currentSequence = sessionActivitySequence
         isSessionActive = true
-        scheduleSeamlessVerificationSuccess(sequence: currentSequence)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.sessionActivitySequence == currentSequence else { return }
@@ -70,41 +69,32 @@ extension AppStore {
             return
         }
 
+        // Try seamless first: watch for a rate-limit signal indicating Codex is still
+        // using stale credentials. If none arrives within the window, declare success
+        // without a restart. If one does arrive, handleSeamlessVerificationFailure()
+        // fires a restart as a fallback.
         seamlessVerificationWork?.cancel()
-        switchOrchestrator.recordImmediateRestart(
-            targetProfileName: candidate.displayName,
-            detail: L(
-                "Yeni hesabın aktif kalmasını garanti etmek için Codex yeniden başlatıldı.",
-                "Codex was restarted to guarantee the new account became active."
-            )
+        switchOrchestrator.startVerifying(
+            targetProfileId: candidate.id,
+            targetProfileName: candidate.displayName
         )
         syncSwitchOrchestrationState()
-        restartAIIfRunning(for: candidate)
+        scheduleSeamlessVerificationSuccess()
     }
 
-    private func scheduleSeamlessVerificationSuccess(sequence: Int) {
-        guard switchOrchestrationState == .verifying else { return }
-
-        seamlessVerificationWork?.cancel()
-        let successWork = DispatchWorkItem { [weak self] in
-            guard let self,
-                  self.switchOrchestrationState == .verifying,
-                  self.sessionActivitySequence == sequence,
-                  let activeProfile else { return }
-
-            let verifyResult = self.profileManager.verifyActiveAccount(expectedAccountId: activeProfile.accountId)
-            guard case .verified = verifyResult else { return }
-
+    private func scheduleSeamlessVerificationSuccess() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.switchOrchestrationState == .verifying else { return }
             self.switchOrchestrator.completeSeamlessSuccess(
                 detail: L(
-                    "Yeni oturum aktivitesi gözlendi; geçiş yeniden başlatmasız doğrulandı.",
-                    "New session activity was observed; the switch was verified without restarting."
+                    "Geçişten sonra limit hatası gözlemlenmedi; geçiş sorunsuz tamamlandı.",
+                    "No rate-limit error observed after the switch; switch completed seamlessly."
                 )
             )
             self.syncSwitchOrchestrationState()
         }
-        seamlessVerificationWork = successWork
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: successWork)
+        seamlessVerificationWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: work)
     }
 
     func handleSeamlessVerificationFailure() {

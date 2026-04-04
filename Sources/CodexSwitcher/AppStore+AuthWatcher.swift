@@ -6,6 +6,14 @@ extension AppStore {
 
     func watchAuthFileForNewLogin() {
         stopAuthWatcher()
+        // Ensure the parent directory and the file itself exist before opening with O_EVTONLY.
+        // On a fresh machine ~/.codex/auth.json doesn't exist yet, which makes open() return -1
+        // and silently drops the watcher — causing the add-account flow to timeout.
+        let authDir = ProfileManager.codexAuthPath.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: authDir, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: ProfileManager.codexAuthPath.path) {
+            FileManager.default.createFile(atPath: ProfileManager.codexAuthPath.path, contents: nil)
+        }
         let fd = open(ProfileManager.codexAuthPath.path, O_EVTONLY)
         guard fd >= 0 else { return }
         authWatcherFd = fd
@@ -75,7 +83,9 @@ extension AppStore {
         guard let profile = profiles.first(where: { $0.id == targetId }) else { return }
 
         if profile.accountId == newAccountId {
-            try? data.write(to: profileManager.authPath(for: profile), options: .atomic)
+            let dest = profileManager.authPath(for: profile)
+            try? data.write(to: dest, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
             staleProfileIds.remove(targetId)
             sendNotification(
                 title: L("Giriş yenilendi", "Re-login successful"),

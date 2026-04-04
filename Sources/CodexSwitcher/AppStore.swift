@@ -323,18 +323,9 @@ final class AppStore: ObservableObject {
     }
 
     private func activateCandidate(_ candidate: Profile, reason: String) {
-        let event = SwitchEvent(
-            id: UUID(),
-            timestamp: Date(),
-            fromAccountName: activeProfile?.displayName,
-            fromAccountId: activeProfile?.id,
-            toAccountName: candidate.displayName,
-            toAccountId: candidate.id,
-            reason: reason
-        )
-        historyStore.append(event)
-        switchHistory = historyStore.load()
-
+        // NOTE: history is written in finalizeActivation, NOT here.
+        // Writing before we know activation succeeded would permanently corrupt analytics
+        // attribution (the parser treats history as authoritative for token ownership).
         do {
             lastAuthWriteDate = Date()
             let verifyResult = try profileManager.activate(profile: candidate)
@@ -375,6 +366,19 @@ final class AppStore: ObservableObject {
     }
 
     private func finalizeActivation(_ candidate: Profile, reason: String) {
+        // Write history ONLY after verified activation to keep analytics attribution clean.
+        let event = SwitchEvent(
+            id: UUID(),
+            timestamp: Date(),
+            fromAccountName: activeProfile?.displayName,
+            fromAccountId: activeProfile?.id,
+            toAccountName: candidate.displayName,
+            toAccountId: candidate.id,
+            reason: reason
+        )
+        historyStore.append(event)
+        switchHistory = historyStore.load()
+
         var config = profileManager.loadConfig()
         if let i = config.profiles.firstIndex(where: { $0.id == candidate.id }) {
             config.profiles[i].activatedAt = Date()
