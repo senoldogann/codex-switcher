@@ -51,40 +51,40 @@ Define the ledger row model, summary model, status/reason enums, and policy knob
 Implement deterministic matching between provider sample windows and local usage records, including skew tolerance, single-window assignment, ignored/reset handling, and reason-code generation.
 
 **Tasks**
-- [ ] Add `ReconciliationEngine` as a pure stateless service.
-- [ ] Build one window per consecutive provider sample pair and skip windows before the selected range cutoff.
-- [ ] Match local usage records to the closest eligible window within `±skewToleranceSeconds`.
-- [ ] Ensure one local usage record contributes to at most one window.
-- [ ] Compute provider weekly/five-hour deltas without converting missing optional percentages to `0`.
-- [ ] Emit `ignored + missing_provider_sample` when the current/previous sample is incomplete.
-- [ ] Emit `ignored + sample_reset_or_counter_jump` when provider percentages move upward in a way that indicates reset/counter discontinuity.
-- [ ] Emit `explained`, `weakAttribution`, or `unexplained` using local token volume, idle detection, and switch-boundary proximity.
-- [ ] Produce a `ReconciliationSummary` from the generated entries.
+- [x] Add `ReconciliationEngine` as a pure stateless service.
+- [x] Build one window per consecutive provider sample pair and skip windows before the selected range cutoff.
+- [x] Match local usage records to the closest eligible window within `±skewToleranceSeconds`.
+- [x] Ensure one local usage record contributes to at most one window.
+- [x] Compute provider weekly/five-hour deltas without converting missing optional percentages to `0`.
+- [x] Emit `ignored + missing_provider_sample` when the current/previous sample is incomplete.
+- [x] Emit `ignored + sample_reset_or_counter_jump` when provider percentages move upward in a way that indicates reset/counter discontinuity.
+- [x] Emit `explained`, `weakAttribution`, or `unexplained` using local token volume, idle detection, and switch-boundary proximity.
+- [x] Produce a `ReconciliationSummary` from the generated entries.
 
 **Entry Gate**
-- [ ] Phase 1 exit gate passed.
-- [ ] Current `AnalyticsEngine.makeUsageAuditEntries` behavior reviewed as migration input.
-- [ ] Existing parser attribution fixes are present on the branch.
+- [x] Phase 1 exit gate passed.
+- [x] Current `AnalyticsEngine.makeUsageAuditEntries` behavior reviewed as migration input.
+- [x] Existing parser attribution fixes are present on the branch.
 
 **Test Gate**
-- [ ] Unit: no-history active profile usage remains attributed.
-- [ ] Unit: missing provider sample fields produce `ignored`, not false drain.
-- [ ] Unit: reset/counter jumps produce `ignored + sample_reset_or_counter_jump`.
-- [ ] Unit: one local record is assigned to only one nearest window under skew tolerance.
-- [ ] Unit: low local tokens plus meaningful provider delta produce `weakAttribution`.
-- [ ] Unit: zero local tokens plus provider delta produce `unexplained` and `idle_drain` when no sessions exist.
+- [x] Unit: no-history active profile usage remains attributed.
+- [x] Unit: missing provider sample fields produce `ignored`, not false drain.
+- [x] Unit: reset/counter jumps produce `ignored + sample_reset_or_counter_jump`.
+- [x] Unit: one local record is assigned to only one nearest window under skew tolerance.
+- [x] Unit: low local tokens plus meaningful provider delta produce `weakAttribution`.
+- [x] Unit: zero local tokens plus provider delta produce `unexplained` and `idle_drain` when no sessions exist.
 
 **Exit Gate**
-- [ ] Engine output is deterministic for a fixed input set.
-- [ ] False positives from missing sample fields and reset jumps are covered by tests.
-- [ ] No reconciliation logic lives in SwiftUI views.
+- [x] Engine output is deterministic for a fixed input set.
+- [x] False positives from missing sample fields and reset jumps are covered by tests.
+- [x] No reconciliation logic lives in SwiftUI views.
 
 **Completion Log**
-- [ ] Status:
-- [ ] Completed:
-- [ ] Test Evidence:
-- [ ] Known Gaps:
-- [ ] Next Phase:
+- [x] Status: Completed
+- [x] Completed: Added `ReconciliationEngine.swift`, `ReconciliationReport`, and unit coverage for missing-sample, reset jump, cutoff/noise-floor, weak attribution, idle drain, and single-window local record assignment.
+- [x] Test Evidence: `swift test --filter ReconciliationEngineTests` passed with 6 tests; `swift test` passed with 60 tests; `swift build -c release` passed; `git diff --check` clean.
+- [x] Known Gaps: Engine output is not yet wired into `AnalyticsSnapshot`, alert selection, or CSV/JSON export. Phase 2 uses profile display names and session IDs only; prompt text and local paths remain intentionally excluded.
+- [x] Next Phase: Phase 3 — extend `AnalyticsSnapshot`, derive alerts from `ReconciliationReport`, and add ledger-safe JSON/CSV export fields plus compatibility tests.
 
 ---
 

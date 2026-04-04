@@ -115,6 +115,13 @@ struct ReconciliationSummary: Codable, Equatable, Sendable {
     }
 }
 
+struct ReconciliationReport: Codable, Equatable, Sendable {
+    let summary: ReconciliationSummary
+    let entries: [ReconciliationEntry]
+
+    static let empty = ReconciliationReport(summary: .empty, entries: [])
+}
+
 struct ReconciliationPolicy: Codable, Equatable, Sendable {
     let skewToleranceSeconds: Int
     let minDrainPercent: Int
