@@ -361,4 +361,224 @@ struct AnalyticsEngineTests {
         #expect(snapshot.usageAuditTimeline.map(\.weeklyDropPercent) == [6, 5])
         #expect(snapshot.usageAuditTimeline.map(\.idleWindow) == [true, false])
     }
+
+    @Test
+    func snapshotKeepsBudgetConfidenceDegradedWhenAnyProfileHasOldSuccessWithoutFailureFlags() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let freshProfile = Profile(alias: "Fresh", email: "fresh@example.com", accountId: "acct-fresh", addedAt: now)
+        let oldProfile = Profile(alias: "Old", email: "old@example.com", accountId: "acct-old", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .sevenDays,
+            profiles: [freshProfile, oldProfile],
+            usageRecords: [],
+            rateLimits: [:],
+            rateLimitHealth: [
+                freshProfile.id: RateLimitHealthStatus(
+                    lastCheckedAt: now,
+                    lastSuccessfulFetchAt: now.addingTimeInterval(-3600),
+                    lastFailedFetchAt: nil,
+                    lastHTTPStatusCode: nil,
+                    staleReason: nil,
+                    failureSummary: nil
+                ),
+                oldProfile.id: RateLimitHealthStatus(
+                    lastCheckedAt: now,
+                    lastSuccessfulFetchAt: now.addingTimeInterval(-48 * 3600),
+                    lastFailedFetchAt: nil,
+                    lastHTTPStatusCode: nil,
+                    staleReason: nil,
+                    failureSummary: nil
+                )
+            ],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.dataQuality.confidence == .degraded)
+        #expect(snapshot.dataQuality.lastSuccessfulFetch == now.addingTimeInterval(-48 * 3600))
+        #expect(snapshot.dataQuality.message != nil)
+    }
+
+    @Test
+    func snapshotSkipsUsageAuditDrainEventsWhenCurrentRateLimitSampleDropsMissingPercentFields() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 77,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now,
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.usageAuditEntries.isEmpty)
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
+    }
+
+    @Test
+    func snapshotIncludesReconciliationLedgerAndDoesNotAlertOnIgnoredRows() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 77,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now,
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try #require(snapshot.reconciliationEntries.first)
+        #expect(entry.status == .ignored)
+        #expect(entry.reasonCode == .missingProviderSample)
+        #expect(snapshot.reconciliationSummary.ignoredCount == 1)
+        #expect(snapshot.reconciliationSummary.unexplainedCount == 0)
+        #expect(snapshot.reconciliationPolicy == ReconciliationPolicy())
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
+    }
+
+    @Test
+    func snapshotDerivesLegacyUsageAuditFromReconciliationEntriesOnly() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let records = [
+            AnalyticsUsageRecord(
+                timestamp: now.addingTimeInterval(-90 * 60),
+                profileId: profile.id,
+                projectPath: "/tmp/current",
+                projectName: "current",
+                sessionId: "s-1",
+                model: "gpt-5",
+                inputTokens: 6_000,
+                cachedInputTokens: 0,
+                outputTokens: 1_000
+            )
+        ]
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: records,
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3 * 3600),
+                        weeklyRemainingPercent: 96,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-2 * 3600),
+                        weeklyRemainingPercent: 89,
+                        fiveHourRemainingPercent: 94,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-1 * 3600),
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.reconciliationEntries.count == 2)
+        #expect(snapshot.reconciliationEntries.map(\.status) == [.ignored, .unexplained])
+        #expect(snapshot.usageAuditEntries.count == 1)
+
+        let legacyEntry = try #require(snapshot.usageAuditEntries.first)
+        #expect(legacyEntry.status == .unattributed)
+        #expect(legacyEntry.weeklyDropPercent == 7)
+        #expect(legacyEntry.fiveHourDropPercent == 6)
+        #expect(snapshot.usageAuditSummary.unattributedCount == 1)
+        #expect(snapshot.usageAuditSummary.totalDrainEvents == 1)
+        #expect(snapshot.usageAuditTimeline.count == 1)
+    }
+
+    @Test
+    func snapshotEmitsUnexplainedDrainAlertFromReconciliationLedger() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3 * 3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-2 * 3600),
+                        weeklyRemainingPercent: 71,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try #require(snapshot.reconciliationEntries.first)
+        #expect(entry.status == .unexplained)
+        #expect(entry.reasonCode == .idleDrain)
+        #expect(snapshot.reconciliationSummary.unexplainedCount == 1)
+
+        let alert = try #require(snapshot.alerts.first(where: { $0.kind == .unattributedDrain }))
+        #expect(alert.severity == .critical)
+        #expect(["Idle limit drain", "Idle limit düşüşü"].contains(alert.title))
+        #expect(alert.message.contains("Alpha"))
+        #expect(alert.message.contains("11"))
+    }
 }

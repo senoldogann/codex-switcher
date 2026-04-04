@@ -120,6 +120,33 @@ struct SwitchOrchestrator {
             max(0, Int(now.timeIntervalSince($0.startedAt).rounded()))
         }
         let targetProfileName = verificationAttempt?.targetProfileName ?? pendingRequest?.targetProfileName ?? "Unknown"
+        finalizeFallbackRestart(
+            targetProfileName: targetProfileName,
+            detail: detail,
+            verificationDurationSeconds: verificationDurationSeconds,
+            now: now
+        )
+    }
+
+    mutating func recordImmediateRestart(
+        targetProfileName: String,
+        detail: String,
+        now: Date = Date()
+    ) {
+        finalizeFallbackRestart(
+            targetProfileName: targetProfileName,
+            detail: detail,
+            verificationDurationSeconds: nil,
+            now: now
+        )
+    }
+
+    private mutating func finalizeFallbackRestart(
+        targetProfileName: String,
+        detail: String,
+        verificationDurationSeconds: Int?,
+        now: Date
+    ) {
         verificationAttempt = nil
         pendingRequest = nil
         state = .idle

@@ -27,10 +27,11 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 ## Features
 
 ### Account Management
-- **Auto-switching** — Detects rate limits via API and switches to the best available account automatically
+- **Auto-switching** — Detects weekly and 5-hour pressure via API and switches to the best available account automatically
 - **Smart selection** — Picks the account with the lowest weekly usage %, not round-robin
-- **Seamless handoff first** — Prefers restart-free next-request switching and uses restart only as controlled fallback
-- **Switch verification** — Post-switch confirmation with automatic rollback on failure
+- **Proactive thresholds** — Leaves the active account before hard exhaustion at `weekly <= 5%` or `5-hour <= 7%`
+- **Restart-guaranteed cutover** — When Codex is active, the app restarts it on switch so the new account is actually applied
+- **Switch verification** — Switch telemetry records queued, restarted, and fallback states for postmortems
 - **Re-login flow** — Refresh stale tokens without leaving the app
 - **Account aliases** — Friendly names per account, rename via right-click
 - **Auth recovery** — Automatic recovery if `~/.codex/auth.json` is corrupted
@@ -52,6 +53,8 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 - **Heatmap** — 7-day × 24-hour activity heatmap showing when you code most
 - **Top $** — Top 20 most expensive prompts ranked by USD cost
 - **Chart** — 7-day daily token usage chart per account
+- **Reconciliation ledger** — Provider-side limit drops are matched against local usage with explained, weak, unexplained, idle, and ignored windows
+- **Forensic export** — Ledger rows export as CSV/JSON with reason codes, confidence, matched sessions, and policy metadata
 
 ### UI & UX
 - **Account health indicators** — 🟢 healthy · 🟡 stale token · ⚪ unchecked · 🔒 exhausted
@@ -114,8 +117,8 @@ What it does:
 2. On detection it calls the rate-limit API to **confirm** the limit is actually reached (no false positives)
 3. If confirmed, it atomically replaces `~/.codex/auth.json` with the best available account
 4. If work is still active, the switch is queued until a safe boundary is reached
-5. CodexSwitcher prefers a seamless next-request handoff without restarting Codex
-6. If verification fails, restart is used as controlled fallback
+5. If work is still active, CodexSwitcher restarts Codex during switch so the new account is guaranteed to take effect
+6. Analytics keeps a reconciliation ledger so provider-side limit drops can be compared against local activity later
 
 Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_tokens` from each session's JSONL events and maps them to the account that was active at that timestamp.
 
@@ -151,6 +154,14 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ---
 
 ## Changelog
+
+### v2.1.4
+- **Reconciliation ledger UI** — The analytics window now shows a sortable forensic ledger with summary pills, reason codes, confidence labels, and row drilldown
+- **Forensic export hardening** — CSV/JSON exports now carry reconciliation rows and policy metadata without prompt text or local project paths
+- **Proactive switch thresholds** — Automatic switching now reacts at `weekly <= 5%` or `5-hour <= 7%` instead of waiting for hard exhaustion
+- **Guaranteed Codex cutover** — Account switches restart a running Codex process so the active CLI does not stay pinned to the exhausted account
+- **Unsafe manual switch guard** — Manual selection and `Switch Now` now skip accounts that are already below safe weekly/5-hour thresholds, avoiding pointless restarts
+- **Legacy cleanup** — Old audit generation logic has been retired internally while compatibility export fields remain bounded for migration
 
 ### v2.1.3
 - **Audit export** — Added direct `CSV` and `JSON` export for trust/audit data from the analytics window

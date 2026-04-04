@@ -172,4 +172,19 @@ struct SwitchOrchestratorTests {
         #expect(orchestrator.timelineEvents.last?.stage == .fallbackRestart)
         #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == 4)
     }
+
+    @Test
+    func recordImmediateRestartTracksTargetProfileName() {
+        var orchestrator = SwitchOrchestrator()
+
+        orchestrator.recordImmediateRestart(
+            targetProfileName: "Account 7",
+            detail: "Restart was required to guarantee the switch."
+        )
+
+        #expect(orchestrator.reliability.fallbackRestartCount == 1)
+        #expect(orchestrator.lastResult?.outcome == .fallbackRestart)
+        #expect(orchestrator.timelineEvents.last?.targetProfileName == "Account 7")
+        #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == nil)
+    }
 }

@@ -1,6 +1,28 @@
 import Foundation
 
 enum AnalyticsAuditExporter {
+    static func buildCSV(for entries: [ReconciliationEntry]) -> String {
+        let formatter = ISO8601DateFormatter()
+        let rows = entries.map { entry in
+            [
+                escaped(entry.profileName),
+                escaped(entry.status.rawValue),
+                escaped(entry.reasonCode.rawValue),
+                escaped(entry.confidence.rawValue),
+                String(entry.providerWeeklyDeltaPercent.map(String.init) ?? ""),
+                String(entry.providerFiveHourDeltaPercent.map(String.init) ?? ""),
+                String(entry.localTokens),
+                escaped(entry.matchedSessionIds.joined(separator: " ")),
+                escaped(formatter.string(from: entry.windowStart)),
+                escaped(formatter.string(from: entry.windowEnd))
+            ].joined(separator: ",")
+        }
+
+        return ([
+            "Profile,Status,Reason,Confidence,Weekly Delta %,5-Hour Delta %,Local Tokens,Matched Sessions,Window Start,Window End"
+        ] + rows).joined(separator: "\n") + "\n"
+    }
+
     static func buildCSV(for entries: [AnalyticsUsageAuditEntry]) -> String {
         let formatter = ISO8601DateFormatter()
         let rows = entries.map { entry in
@@ -45,6 +67,9 @@ private struct AnalyticsAuditPayload: Encodable {
     let usageAuditSummary: AnalyticsUsageAuditSummaryPayload
     let usageAuditEntries: [AnalyticsUsageAuditEntryPayload]
     let usageAuditTimeline: [AnalyticsUsageAuditPointPayload]
+    let reconciliationSummary: ReconciliationSummaryPayload
+    let reconciliationEntries: [ReconciliationEntryPayload]
+    let reconciliationPolicy: ReconciliationPolicyPayload
 
     init(snapshot: AnalyticsSnapshot) {
         generatedAt = snapshot.generatedAt
@@ -52,6 +77,9 @@ private struct AnalyticsAuditPayload: Encodable {
         usageAuditSummary = AnalyticsUsageAuditSummaryPayload(summary: snapshot.usageAuditSummary)
         usageAuditEntries = snapshot.usageAuditEntries.map(AnalyticsUsageAuditEntryPayload.init)
         usageAuditTimeline = snapshot.usageAuditTimeline.map(AnalyticsUsageAuditPointPayload.init)
+        reconciliationSummary = ReconciliationSummaryPayload(summary: snapshot.reconciliationSummary)
+        reconciliationEntries = snapshot.reconciliationEntries.map(ReconciliationEntryPayload.init)
+        reconciliationPolicy = ReconciliationPolicyPayload(policy: snapshot.reconciliationPolicy)
     }
 }
 
@@ -114,5 +142,73 @@ private struct AnalyticsUsageAuditPointPayload: Encodable {
         localTokens = point.localTokens
         idleWindow = point.idleWindow
         status = point.status.rawValue
+    }
+}
+
+private struct ReconciliationSummaryPayload: Encodable {
+    let explainedCount: Int
+    let weakAttributionCount: Int
+    let unexplainedCount: Int
+    let ignoredCount: Int
+    let idleDrainCount: Int
+    let totalWindowCount: Int
+    let totalProviderWeeklyDeltaPercent: Int
+    let totalProviderFiveHourDeltaPercent: Int
+    let totalLocalTokens: Int
+    let latestWindowEnd: Date?
+
+    init(summary: ReconciliationSummary) {
+        explainedCount = summary.explainedCount
+        weakAttributionCount = summary.weakAttributionCount
+        unexplainedCount = summary.unexplainedCount
+        ignoredCount = summary.ignoredCount
+        idleDrainCount = summary.idleDrainCount
+        totalWindowCount = summary.totalWindowCount
+        totalProviderWeeklyDeltaPercent = summary.totalProviderWeeklyDeltaPercent
+        totalProviderFiveHourDeltaPercent = summary.totalProviderFiveHourDeltaPercent
+        totalLocalTokens = summary.totalLocalTokens
+        latestWindowEnd = summary.latestWindowEnd
+    }
+}
+
+private struct ReconciliationEntryPayload: Encodable {
+    let profileId: UUID
+    let profileName: String
+    let windowStart: Date
+    let windowEnd: Date
+    let providerWeeklyDeltaPercent: Int?
+    let providerFiveHourDeltaPercent: Int?
+    let localTokens: Int
+    let matchedSessionIds: [String]
+    let status: String
+    let reasonCode: String
+    let confidence: String
+
+    init(entry: ReconciliationEntry) {
+        profileId = entry.profileId
+        profileName = entry.profileName
+        windowStart = entry.windowStart
+        windowEnd = entry.windowEnd
+        providerWeeklyDeltaPercent = entry.providerWeeklyDeltaPercent
+        providerFiveHourDeltaPercent = entry.providerFiveHourDeltaPercent
+        localTokens = entry.localTokens
+        matchedSessionIds = entry.matchedSessionIds
+        status = entry.status.rawValue
+        reasonCode = entry.reasonCode.rawValue
+        confidence = entry.confidence.rawValue
+    }
+}
+
+private struct ReconciliationPolicyPayload: Encodable {
+    let skewToleranceSeconds: Int
+    let minDrainPercent: Int
+    let minFiveHourDrainPercent: Int
+    let lowLocalTokenThreshold: Int
+
+    init(policy: ReconciliationPolicy) {
+        skewToleranceSeconds = policy.skewToleranceSeconds
+        minDrainPercent = policy.minDrainPercent
+        minFiveHourDrainPercent = policy.minFiveHourDrainPercent
+        lowLocalTokenThreshold = policy.lowLocalTokenThreshold
     }
 }

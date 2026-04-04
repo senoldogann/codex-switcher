@@ -168,19 +168,13 @@ final class SessionTokenParser: @unchecked Sendable {
                 // 7 günlük pencere dışındaki event'leri atla
                 guard delta.timestamp > windowStart else { continue }
 
-                let profileId: UUID?
-
-                // Event timestamp'i son switch'ten sonraysa → aktif hesap
-                // Aksi hâlde → event'in gerçekleştiği andaki aktif hesap
-                if let activeProfileId = activeProfileId,
-                   let lastSwitch = lastSwitchTime,
-                   delta.timestamp > lastSwitch {
-                    profileId = activeProfileId
-                } else {
-                    profileId = findActiveProfile(at: delta.timestamp,
-                                                  profiles: profiles,
-                                                  history: history)
-                }
+                let profileId = resolveProfileId(
+                    for: delta.timestamp,
+                    profiles: profiles,
+                    history: history,
+                    activeProfileId: activeProfileId,
+                    lastSwitchTime: lastSwitchTime
+                )
 
                 guard let profileId = profileId else { continue }
 
@@ -229,6 +223,26 @@ final class SessionTokenParser: @unchecked Sendable {
             return nil
         }
         return lastSwitch.toAccountId
+    }
+
+    private func resolveProfileId(
+        for date: Date,
+        profiles: [Profile],
+        history: [SwitchEvent],
+        activeProfileId: UUID?,
+        lastSwitchTime: Date?
+    ) -> UUID? {
+        if let activeProfileId, lastSwitchTime == nil {
+            return activeProfileId
+        }
+
+        if let activeProfileId,
+           let lastSwitchTime,
+           date > lastSwitchTime {
+            return activeProfileId
+        }
+
+        return findActiveProfile(at: date, profiles: profiles, history: history)
     }
 
     // MARK: - Session Parsing (CodexBar yaklaşımı: delta hesaplama)
@@ -346,14 +360,13 @@ final class SessionTokenParser: @unchecked Sendable {
             for delta in deltas {
                 if let windowStart, delta.timestamp <= windowStart { continue }
 
-                let profileId: UUID?
-                if let activeProfileId,
-                   let lastSwitch = lastSwitchTime,
-                   delta.timestamp > lastSwitch {
-                    profileId = activeProfileId
-                } else {
-                    profileId = findActiveProfile(at: delta.timestamp, profiles: profiles, history: history)
-                }
+                let profileId = resolveProfileId(
+                    for: delta.timestamp,
+                    profiles: profiles,
+                    history: history,
+                    activeProfileId: activeProfileId,
+                    lastSwitchTime: lastSwitchTime
+                )
                 guard let pid = profileId else { continue }
 
                 let day = calendar.startOfDay(for: delta.timestamp)
@@ -408,14 +421,13 @@ final class SessionTokenParser: @unchecked Sendable {
             let sessionId = meta?.sessionId ?? URL(fileURLWithPath: sessionPath).lastPathComponent
 
             for delta in deltas {
-                let profileId: UUID?
-                if let activeProfileId,
-                   let lastSwitch = lastSwitchTime,
-                   delta.timestamp > lastSwitch {
-                    profileId = activeProfileId
-                } else {
-                    profileId = findActiveProfile(at: delta.timestamp, profiles: profiles, history: history)
-                }
+                let profileId = resolveProfileId(
+                    for: delta.timestamp,
+                    profiles: profiles,
+                    history: history,
+                    activeProfileId: activeProfileId,
+                    lastSwitchTime: lastSwitchTime
+                )
 
                 guard let profileId else { continue }
 
