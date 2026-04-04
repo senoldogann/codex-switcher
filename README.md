@@ -155,11 +155,12 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
-### Unreleased
+### v2.1.4
 - **Reconciliation ledger UI** — The analytics window now shows a sortable forensic ledger with summary pills, reason codes, confidence labels, and row drilldown
 - **Forensic export hardening** — CSV/JSON exports now carry reconciliation rows and policy metadata without prompt text or local project paths
 - **Proactive switch thresholds** — Automatic switching now reacts at `weekly <= 5%` or `5-hour <= 7%` instead of waiting for hard exhaustion
 - **Guaranteed Codex cutover** — Account switches restart a running Codex process so the active CLI does not stay pinned to the exhausted account
+- **Unsafe manual switch guard** — Manual selection and `Switch Now` now skip accounts that are already below safe weekly/5-hour thresholds, avoiding pointless restarts
 - **Legacy cleanup** — Old audit generation logic has been retired internally while compatibility export fields remain bounded for migration
 
 ### v2.1.3

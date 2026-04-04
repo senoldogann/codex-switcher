@@ -114,4 +114,50 @@ struct SwitchDecisionPolicyTests {
         #expect(policy.automaticReasonKind(for: fiveHour) == .fiveHourPressure)
         #expect(policy.automaticReasonKind(for: weekly) == .weeklyPressure)
     }
+
+    @Test
+    func nextManualCandidateSkipsUnsafeTargetsAndKeepsRoundRobinOrder() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let active = Profile(alias: "Active", email: "active@example.com", accountId: "acct-active", addedAt: now)
+        let unsafeWeekly = Profile(alias: "UnsafeWeekly", email: "unsafe-weekly@example.com", accountId: "acct-unsafe-weekly", addedAt: now)
+        let unsafeFiveHour = Profile(alias: "Unsafe5h", email: "unsafe-5h@example.com", accountId: "acct-unsafe-5h", addedAt: now)
+        let safe = Profile(alias: "Safe", email: "safe@example.com", accountId: "acct-safe", addedAt: now)
+        let policy = SwitchDecisionPolicy()
+
+        let candidate = policy.nextManualCandidate(
+            profiles: [active, unsafeWeekly, unsafeFiveHour, safe],
+            activeProfileId: active.id,
+            rateLimits: [
+                unsafeWeekly.id: RateLimitInfo(
+                    planType: "plus",
+                    allowed: true,
+                    limitReached: false,
+                    weeklyUsedPercent: 99,
+                    weeklyResetAt: nil,
+                    fiveHourRemainingPercent: 40,
+                    fiveHourResetAt: nil
+                ),
+                unsafeFiveHour.id: RateLimitInfo(
+                    planType: "plus",
+                    allowed: true,
+                    limitReached: false,
+                    weeklyUsedPercent: 60,
+                    weeklyResetAt: nil,
+                    fiveHourRemainingPercent: 0,
+                    fiveHourResetAt: nil
+                ),
+                safe.id: RateLimitInfo(
+                    planType: "plus",
+                    allowed: true,
+                    limitReached: false,
+                    weeklyUsedPercent: 22,
+                    weeklyResetAt: nil,
+                    fiveHourRemainingPercent: 55,
+                    fiveHourResetAt: nil
+                )
+            ]
+        )
+
+        #expect(candidate?.id == safe.id)
+    }
 }

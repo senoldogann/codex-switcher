@@ -587,11 +587,11 @@ final class AppStore: ObservableObject {
             )
         }
 
-        // Manuel geçiş: round-robin
-        let currentIndex = profiles.firstIndex { $0.id == activeProfile?.id } ?? -1
-        return candidates.first {
-            profiles.firstIndex(of: $0) == (currentIndex + 1) % profiles.count
-        } ?? candidates.first
+        return switchDecisionPolicy.nextManualCandidate(
+            profiles: profiles,
+            activeProfileId: activeProfile?.id,
+            rateLimits: rateLimits
+        ) ?? candidates.first(where: { rateLimits[$0.id] == nil })
     }
 
     // MARK: - Switching
@@ -609,6 +609,13 @@ final class AppStore: ObservableObject {
 
     func switchTo(profile: Profile) {
         captureUsageForActive()
+        guard switchDecisionPolicy.isEligibleCandidate(rateLimits[profile.id]) else {
+            sendNotification(
+                title: L("Hesap uygun değil", "Account is not eligible"),
+                body: manualSwitchBlockedMessage(for: profile, rateLimit: rateLimits[profile.id])
+            )
+            return
+        }
         switchTo(profile: profile, reason: L("Manuel seçim", "Manual selection"))
     }
 
@@ -653,6 +660,22 @@ final class AppStore: ObservableObject {
         } catch {
             sendNotification(title: L("Geçiş başarısız", "Switch failed"), body: error.localizedDescription)
         }
+    }
+
+    private func manualSwitchBlockedMessage(for profile: Profile, rateLimit: RateLimitInfo?) -> String {
+        guard let rateLimit else {
+            return L(
+                "\(profile.displayName) için güncel limit verisi yok.",
+                "No current limit data is available for \(profile.displayName)."
+            )
+        }
+
+        let weeklyRemaining = max(0, 100 - (rateLimit.weeklyUsedPercent ?? 100))
+        let fiveHourRemaining = rateLimit.fiveHourRemainingPercent ?? 0
+        return L(
+            "\(profile.displayName) güvenli değil. Haftalık kalan %\(weeklyRemaining), 5 saatlik kalan %\(fiveHourRemaining).",
+            "\(profile.displayName) is not safe to switch into. Weekly remaining \(weeklyRemaining)%, 5-hour remaining \(fiveHourRemaining)%."
+        )
     }
 
     private func finalizeActivation(_ candidate: Profile, reason: String) {

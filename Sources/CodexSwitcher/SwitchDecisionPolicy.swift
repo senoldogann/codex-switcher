@@ -51,6 +51,24 @@ struct SwitchDecisionPolicy {
         }
     }
 
+    func nextManualCandidate(
+        profiles: [Profile],
+        activeProfileId: UUID?,
+        rateLimits: [UUID: RateLimitInfo]
+    ) -> Profile? {
+        guard !profiles.isEmpty else { return nil }
+        let activeIndex = profiles.firstIndex { $0.id == activeProfileId } ?? -1
+
+        return (1...profiles.count)
+            .compactMap { offset -> Profile? in
+                let index = (activeIndex + offset + profiles.count) % profiles.count
+                let candidate = profiles[index]
+                guard candidate.id != activeProfileId else { return nil }
+                return candidate
+            }
+            .first { isEligibleCandidate(rateLimits[$0.id]) }
+    }
+
     func automaticReasonKind(for rateLimit: RateLimitInfo?) -> AutomaticSwitchReasonKind? {
         guard let rateLimit else { return nil }
         if rateLimit.limitReached { return .limitReached }
