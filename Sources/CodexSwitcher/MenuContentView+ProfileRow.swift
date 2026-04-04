@@ -13,7 +13,11 @@ extension MenuContentView {
     func healthDot(for profile: Profile) -> some View {
         let color: Color = {
             if store.staleProfileIds.contains(profile.id) { return .yellow }
-            if store.rateLimits[profile.id] != nil { return .green }
+            if let rl = store.rateLimits[profile.id] {
+                if rl.limitReached { return .red }
+                if let weekly = rl.weeklyRemainingPercent, weekly <= 0 { return .red }
+                return .green
+            }
             return .gray
         }()
         return Circle()

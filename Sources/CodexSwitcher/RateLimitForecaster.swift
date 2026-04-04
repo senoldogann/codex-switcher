@@ -72,6 +72,12 @@ struct RateLimitForecaster {
             return RateLimitForecast(riskLevel: .safe)
         }
 
+        // Weekly budget at 0 voids the 5-hour budget — even if fiveHourRemainingPercent
+        // shows 100%, no requests can succeed until the weekly limit resets.
+        if let weekly = rl.weeklyRemainingPercent, weekly <= 0 {
+            return RateLimitForecast(riskLevel: .exhausted)
+        }
+
         // Determine remaining percentage (use 5-hour window as primary for risk level).
         // ETA calculation uses weekly data only — the 7-day JSONL tokenUsage only aligns
         // with the weekly window; using it against the 5-hour window produces garbage ETAs.
