@@ -23,7 +23,7 @@ struct AnalyticsWindowView: View {
                 trendSection
                 breakdownSection
                 limitPressureSection
-                usageAuditSection
+                reconciliationSection
                 alertsSection
             }
             .padding(24)
@@ -389,156 +389,12 @@ struct AnalyticsWindowView: View {
         }
     }
 
-    private var usageAuditSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                sectionHeader(
-                    title: L("Kullanım auditi", "Usage audit"),
-                    subtitle: L(
-                        "Provider limit düşüşleri ile local usage kayıtlarının karşılaştırması",
-                        "Comparison of provider limit drops against local usage records"
-                    )
-                )
-                Spacer()
-                HStack(spacing: 10) {
-                    exportButton(title: "CSV", type: .commaSeparatedText) {
-                        AnalyticsAuditExporter.buildCSV(for: snapshot.usageAuditEntries)
-                    }
-                    exportButton(title: "JSON", type: .json) {
-                        try AnalyticsAuditExporter.buildJSON(for: snapshot)
-                    }
-                }
-            }
-
-            if snapshot.usageAuditEntries.isEmpty {
-                Text(L("Açıklanamayan limit düşüşü saptanmadı", "No unattributed limit drain detected"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(gw.opacity(0.32))
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(cardBackground)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        auditSummaryPill(
-                            label: L("Açıklanmış", "Explained"),
-                            value: snapshot.usageAuditSummary.explainedCount,
-                            tint: .green
-                        )
-                        auditSummaryPill(
-                            label: L("Zayıf", "Weak"),
-                            value: snapshot.usageAuditSummary.weakAttributionCount,
-                            tint: .orange
-                        )
-                        auditSummaryPill(
-                            label: L("Açıklanamayan", "Unattributed"),
-                            value: snapshot.usageAuditSummary.unattributedCount,
-                            tint: .red
-                        )
-                        auditSummaryPill(
-                            label: L("Idle", "Idle"),
-                            value: snapshot.usageAuditSummary.idleDrainCount,
-                            tint: .pink
-                        )
-                    }
-
-                    if !snapshot.usageAuditTimeline.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(L("Drain timeline", "Drain timeline"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(gw.opacity(0.72))
-
-                            Chart(snapshot.usageAuditTimeline) { point in
-                                PointMark(
-                                    x: .value("Time", point.timestamp),
-                                    y: .value("Weekly drop", point.weeklyDropPercent)
-                                )
-                                .symbolSize(point.idleWindow ? 90 : 70)
-                                .foregroundStyle(auditTimelineColor(for: point))
-                            }
-                            .chartXAxis {
-                                AxisMarks(values: .automatic(desiredCount: 5)) { value in
-                                    AxisGridLine().foregroundStyle(gw.opacity(0.05))
-                                    AxisValueLabel {
-                                        if let date = value.as(Date.self) {
-                                            Text(axisLabel(for: date))
-                                                .font(.system(size: 9))
-                                                .foregroundStyle(gw.opacity(0.36))
-                                        }
-                                    }
-                                }
-                            }
-                            .chartYAxis {
-                                AxisMarks(position: .leading) { value in
-                                    AxisGridLine().foregroundStyle(gw.opacity(0.05))
-                                    AxisValueLabel {
-                                        if let numeric = value.as(Int.self) {
-                                            Text("\(numeric)%")
-                                                .font(.system(size: 9))
-                                                .foregroundStyle(gw.opacity(0.34))
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(height: 120)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(cardBackground)
-                    }
-
-                    ForEach(Array(snapshot.usageAuditEntries.prefix(6))) { entry in
-                        HStack(alignment: .top, spacing: 12) {
-                            Circle()
-                                .fill(auditStatusColor(entry.status).opacity(0.9))
-                                .frame(width: 10, height: 10)
-                                .padding(.top, 4)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(entry.profileName)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(gw.opacity(0.82))
-                                    Text(auditStatusText(entry.status))
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundStyle(auditStatusColor(entry.status))
-                                    Spacer()
-                                    Text(entry.windowEnd.formatted(date: .omitted, time: .shortened))
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(gw.opacity(0.34))
-                                }
-
-                                HStack(spacing: 10) {
-                                    pressureMetric(
-                                        label: L("Haftalık düşüş", "Weekly drop"),
-                                        value: "\(entry.weeklyDropPercent)%"
-                                    )
-                                    pressureMetric(
-                                        label: L("5 saat düşüş", "5-hour drop"),
-                                        value: "\(entry.fiveHourDropPercent)%"
-                                    )
-                                    pressureMetric(
-                                        label: L("Local token", "Local tokens"),
-                                        value: formatTokens(entry.localTokens)
-                                    )
-                                    pressureMetric(
-                                        label: L("Oturum", "Sessions"),
-                                        value: "\(entry.localSessionCount)"
-                                    )
-                                }
-
-                                Text(auditMessage(for: entry))
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(gw.opacity(0.38))
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(cardBackground)
-                    }
-                }
-            }
-        }
+    private var reconciliationSection: some View {
+        AnalyticsReconciliationSection(
+            snapshot: snapshot,
+            foregroundColor: gw,
+            exportAction: exportAudit(type:content:)
+        )
     }
 
     private var alertsSection: some View {
@@ -699,72 +555,4 @@ struct AnalyticsWindowView: View {
         }
     }
 
-    private func auditSummaryPill(label: String, value: Int, tint: Color) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(gw.opacity(0.52))
-            Text("\(value)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(tint.opacity(0.9))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            Capsule()
-                .fill(gw.opacity(0.05))
-        )
-    }
-
-    private func auditStatusColor(_ status: AnalyticsUsageAuditStatus) -> Color {
-        switch status {
-        case .explained: return .green
-        case .weakAttribution: return .orange
-        case .unattributed: return .red
-        }
-    }
-
-    private func auditStatusText(_ status: AnalyticsUsageAuditStatus) -> String {
-        switch status {
-        case .explained:
-            return L("Açıklanmış", "Explained")
-        case .weakAttribution:
-            return L("Zayıf attribution", "Weak attribution")
-        case .unattributed:
-            return L("Açıklanamayan", "Unattributed")
-        }
-    }
-
-    private func auditTimelineColor(for point: AnalyticsUsageAuditPoint) -> Color {
-        if point.idleWindow {
-            return .pink.opacity(0.85)
-        }
-        return auditStatusColor(point.status).opacity(0.85)
-    }
-
-    private func auditMessage(for entry: AnalyticsUsageAuditEntry) -> String {
-        switch entry.status {
-        case .explained:
-            return L(
-                "Bu penceredeki limit düşüşü local usage ile büyük ölçüde eşleşiyor.",
-                "The limit drop in this window broadly matches local usage."
-            )
-        case .weakAttribution:
-            return L(
-                "Limit düşüşü gözleniyor ancak local activity bunu tam açıklamıyor.",
-                "A limit drop is visible but local activity does not fully explain it."
-            )
-        case .unattributed:
-            if entry.idleWindow {
-                return L(
-                    "Bu aralıkta local activity görünmedi; düşüş idle halde gerçekleşti.",
-                    "No local activity was recorded in this window; the drop happened while idle."
-                )
-            }
-            return L(
-                "Provider tarafında düşüş var fakat bu aralıkta local usage kaydı yok.",
-                "Provider capacity dropped in this window with no local usage recorded."
-            )
-        }
-    }
 }

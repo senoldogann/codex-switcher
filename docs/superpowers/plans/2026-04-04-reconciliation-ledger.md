@@ -133,35 +133,35 @@ Promote the ledger into `AnalyticsSnapshot`, make alerts derive from ledger rows
 Turn the current audit card into a readable forensic ledger with summary pills, sortable row list, and one-row detail inspection, without overbuilding a heavy table framework.
 
 **Tasks**
-- [ ] Replace the current audit list with a ledger section backed by `reconciliationEntries`.
-- [ ] Show summary pills for explained, weak, unexplained, idle, and ignored windows.
-- [ ] Render each row with account, window, provider delta, local tokens, matched sessions count, status, reason, and confidence.
-- [ ] Add a lightweight selected-row detail panel showing matched session IDs, skew/boundary note, and reason explanation.
-- [ ] Make suspicious states visually distinct while keeping ignored/reset rows visible but lower priority.
-- [ ] Preserve current dark/light styling and avoid expensive per-row computation inside SwiftUI `body`.
+- [x] Replace the current audit list with a ledger section backed by `reconciliationEntries`.
+- [x] Show summary pills for explained, weak, unexplained, idle, and ignored windows.
+- [x] Render each row with account, window, provider delta, local tokens, matched sessions count, status, reason, and confidence.
+- [x] Add a lightweight selected-row detail panel showing matched session IDs, skew/boundary note, and reason explanation.
+- [x] Make suspicious states visually distinct while keeping ignored/reset rows visible but lower priority.
+- [x] Preserve current dark/light styling and avoid expensive per-row computation inside SwiftUI `body`.
 
 **Entry Gate**
-- [ ] Phase 3 exit gate passed.
-- [ ] UX copy for status/reason labels mapped from machine-readable enums.
-- [ ] Sensitive export/display policy confirmed: no prompt text in this phase.
+- [x] Phase 3 exit gate passed.
+- [x] UX copy for status/reason labels mapped from machine-readable enums.
+- [x] Sensitive export/display policy confirmed: no prompt text in this phase.
 
 **Test Gate**
-- [ ] Unit: view label mapping for reason/status/confidence remains stable.
-- [ ] Integration: ledger section renders empty, explained, unexplained, and ignored states from fixture snapshots.
+- [x] Unit: view label mapping for reason/status/confidence remains stable.
+- [x] Integration: ledger section renders empty, explained, unexplained, and ignored states from fixture snapshots.
 - [ ] E2E/manual: suspicious drain row can be selected, detail is readable, and export still works.
-- [ ] Performance: no obvious `ForEach` identity churn or repeated sorting/filtering in `body`.
+- [x] Performance: no obvious `ForEach` identity churn or repeated sorting/filtering in `body`.
 
 **Exit Gate**
-- [ ] A user can answer “why was this window classified this way?” from the ledger UI alone.
-- [ ] No new heavy SwiftUI invalidation pattern is introduced.
-- [ ] `swift test` and `swift build -c release` pass.
+- [x] A user can answer “why was this window classified this way?” from the ledger UI alone.
+- [x] No new heavy SwiftUI invalidation pattern is introduced.
+- [x] `swift test` and `swift build -c release` pass.
 
 **Completion Log**
-- [ ] Status:
-- [ ] Completed:
-- [ ] Test Evidence:
-- [ ] Known Gaps:
-- [ ] Next Phase:
+- [x] Status: In progress — implementation complete, manual E2E pending
+- [x] Completed: Replaced the old usage-audit card with a dedicated reconciliation ledger section, added summary pills, sort order selection, selectable row details, and a pure presentation/state layer to keep labels, notes, and ordering testable outside SwiftUI.
+- [x] Test Evidence: `swift test --filter ReconciliationLedgerPresentationTests` passed with 4 tests; `swift test` passed with 75 tests; `swift build -c release` passed; `git diff --check` clean.
+- [x] Known Gaps: Manual E2E is still pending. Launching the raw SwiftPM debug binary is not a valid UI harness for this menu bar app because AppKit/UserNotifications expect a bundled app context. No prompt text or local paths were added to the UI.
+- [x] Next Phase: Finish Phase 4 with manual app-bundle validation, then move to Phase 5 cleanup and removal of legacy audit shims.
 
 ---
 
