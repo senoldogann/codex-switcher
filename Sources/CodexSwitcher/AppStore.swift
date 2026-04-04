@@ -109,6 +109,7 @@ final class AppStore: ObservableObject {
     private let switchTimelineStore = SwitchTimelineStore()
     private let tokenParser = SessionTokenParser()
     private let analyticsEngine = AnalyticsEngine()
+    private let switchDecisionPolicy = SwitchDecisionPolicy()
     private var usageTimer: Timer?
     private var rateLimitTimer: Timer?
     private var automationHealthTimer: Timer?
@@ -308,6 +309,7 @@ final class AppStore: ObservableObject {
         staleProfileIds = newStale
         refreshReliabilityAnalytics()
         NotificationCenter.default.post(name: .rateLimitsUpdated, object: nil)
+        evaluateAutomaticSwitchAfterRateLimitRefresh()
         refreshTokenUsage()
         // Note: updateCostsAndForecasts is called within refreshTokenUsage after async completion
     }
@@ -578,20 +580,11 @@ final class AppStore: ObservableObject {
         guard !candidates.isEmpty else { return nil }
 
         if auto {
-            // Kullanılabilir hesaplar: veri yoksa optimistik (bilinmiyor = dene),
-            // veri varsa limitReached=false VE weekly < 100
-            let available = candidates.filter { profile in
-                guard let rl = rateLimits[profile.id] else { return true } // veri yok → dene
-                return !rl.limitReached && (rl.weeklyUsedPercent ?? 0) < 100
-            }
-
-            // Hiç kullanılabilir hesap yoksa → allExhausted
-            guard !available.isEmpty else { return nil }
-
-            // En düşük haftalık kullanımlı hesabı seç (veri yoksa 0 say)
-            return available.min {
-                (rateLimits[$0.id]?.weeklyUsedPercent ?? 0) < (rateLimits[$1.id]?.weeklyUsedPercent ?? 0)
-            }
+            return switchDecisionPolicy.nextAutomaticCandidate(
+                profiles: profiles,
+                activeProfileId: activeProfile?.id,
+                rateLimits: rateLimits
+            )
         }
 
         // Manuel geçiş: round-robin
@@ -771,8 +764,7 @@ final class AppStore: ObservableObject {
             guard let activeId = activeProfile?.id else { return }
 
             if let rl = rateLimits[activeId] {
-                // Güncel API verisi var — sadece gerçekten limitdeyse geç
-                guard rl.limitReached else { return }
+                guard self.switchDecisionPolicy.shouldLeaveCurrentProfile(rl) else { return }
             }
             // Hesap verisi yoksa (API başarısız) → ihtiyatlı olarak geç
 
@@ -782,13 +774,38 @@ final class AppStore: ObservableObject {
             }
 
             lastAutoSwitchDate = Date()
-            let reason = L("Limit doldu", "Limit reached")
+            let reason = self.automaticSwitchReason(for: self.rateLimits[activeId])
             if self.isSessionActive {
                 self.queuePendingSwitch(reason: reason)
                 return
             }
             self.switchToNext(reason: reason)
         }
+    }
+
+    private func evaluateAutomaticSwitchAfterRateLimitRefresh() {
+        guard !allExhausted,
+              let activeId = activeProfile?.id,
+              let activeRateLimit = rateLimits[activeId],
+              switchDecisionPolicy.shouldLeaveCurrentProfile(activeRateLimit) else {
+            return
+        }
+        if let last = lastAutoSwitchDate,
+           Date().timeIntervalSince(last) < Self.switchCooldown {
+            return
+        }
+        if switchOrchestrationState == .verifying {
+            handleSeamlessVerificationFailure()
+            return
+        }
+
+        let reason = automaticSwitchReason(for: activeRateLimit)
+        lastAutoSwitchDate = Date()
+        if isSessionActive {
+            queuePendingSwitch(reason: reason)
+            return
+        }
+        switchToNext(reason: reason)
     }
 
     // MARK: - Add Account
@@ -1283,25 +1300,16 @@ final class AppStore: ObservableObject {
             return
         }
 
-        switchOrchestrator.startVerifying(
-            targetProfileId: candidate.id,
-            targetProfileName: candidate.displayName
+        seamlessVerificationWork?.cancel()
+        switchOrchestrator.recordImmediateRestart(
+            targetProfileName: candidate.displayName,
+            detail: L(
+                "Yeni hesabın aktif kalmasını garanti etmek için Codex yeniden başlatıldı.",
+                "Codex was restarted to guarantee the new account became active."
+            )
         )
         syncSwitchOrchestrationState()
-
-        seamlessVerificationWork?.cancel()
-        let timeoutWork = DispatchWorkItem { [weak self] in
-            guard let self, self.switchOrchestrationState == .verifying else { return }
-            self.switchOrchestrator.markInconclusive(
-                detail: L(
-                    "Yeni istek gözlenemedi; geçiş yeniden başlatmasız bırakıldı.",
-                    "No new request was observed; the switch was left restart-free."
-                )
-            )
-            self.syncSwitchOrchestrationState()
-        }
-        seamlessVerificationWork = timeoutWork
-        DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: timeoutWork)
+        restartAIIfRunning(for: candidate)
     }
 
     private func scheduleSeamlessVerificationSuccess(sequence: Int) {
@@ -1422,6 +1430,19 @@ final class AppStore: ObservableObject {
 
     private func notifyProfileChanged() {
         NotificationCenter.default.post(name: .profileChanged, object: nil)
+    }
+
+    private func automaticSwitchReason(for rateLimit: RateLimitInfo?) -> String {
+        switch switchDecisionPolicy.automaticReasonKind(for: rateLimit) {
+        case .limitReached:
+            return L("Limit doldu", "Limit reached")
+        case .fiveHourPressure:
+            return L("5 saatlik limit kritik seviyede", "5-hour limit is critically low")
+        case .weeklyPressure:
+            return L("Haftalık limit kritik seviyede", "Weekly limit is critically low")
+        case nil:
+            return L("Limit kritik seviyede", "Limit is critically low")
+        }
     }
 
     private func requestNotificationPermission() {
