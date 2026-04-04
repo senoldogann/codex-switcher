@@ -991,7 +991,11 @@ struct MenuContentView: View {
 
                 railDivider
 
-                railButton("dollarsign.circle", budgetLabel) {
+                railButton(
+                    "dollarsign.circle",
+                    budgetState.label,
+                    foreground: budgetState.isExceeded ? .red.opacity(0.86) : nil
+                ) {
                     showBudgetAlert()
                 }
 
@@ -1068,11 +1072,10 @@ struct MenuContentView: View {
 
     // MARK: - Budget
 
-    private var budgetLabel: String {
+    private var budgetState: BudgetUsageState {
         let limit = UserDefaults.standard.double(forKey: "weeklyBudgetUSD")
-        if limit <= 0 { return L("Bütçe", "Budget") }
         let spent = store.costs.values.reduce(0, +)
-        return "$\(String(format: "%.0f", spent))/$\(String(format: "%.0f", limit))"
+        return BudgetUsageState.make(spent: spent, limit: limit)
     }
 
     private func showBudgetAlert() {
@@ -1137,10 +1140,16 @@ struct MenuContentView: View {
         _ icon: String,
         _ label: String,
         selected: Bool = false,
+        foreground: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            railButtonBody(icon: icon, label: label, selected: selected, foreground: selected ? gw.opacity(0.76) : gw.opacity(0.42))
+            railButtonBody(
+                icon: icon,
+                label: label,
+                selected: selected,
+                foreground: foreground ?? (selected ? gw.opacity(0.76) : gw.opacity(0.42))
+            )
         }
         .buttonStyle(.plain)
         .pointerCursor()

@@ -369,7 +369,10 @@ struct AnalyticsEngine: Sendable {
         let staleProfiles = health.compactMap { id, status in
             (status.staleReason != nil || status.failureSummary != nil) ? id : nil
         }
-        let lastSuccessfulFetch = health.values.compactMap(\.lastSuccessfulFetchAt).max()
+        let lastSuccessfulFetches = health.values.compactMap(\.lastSuccessfulFetchAt)
+        let lastSuccessfulFetch = staleProfiles.isEmpty
+            ? lastSuccessfulFetches.min()
+            : lastSuccessfulFetches.max()
 
         let confidence: AnalyticsDataConfidence
         let message: String?
@@ -413,8 +416,14 @@ struct AnalyticsEngine: Sendable {
 
                 if let cutoff, current.timestamp <= cutoff { continue }
 
-                let weeklyDrop = max(0, (previous.weeklyRemainingPercent ?? 0) - (current.weeklyRemainingPercent ?? 0))
-                let fiveHourDrop = max(0, (previous.fiveHourRemainingPercent ?? 0) - (current.fiveHourRemainingPercent ?? 0))
+                let weeklyDrop = makeDrop(
+                    previous: previous.weeklyRemainingPercent,
+                    current: current.weeklyRemainingPercent
+                )
+                let fiveHourDrop = makeDrop(
+                    previous: previous.fiveHourRemainingPercent,
+                    current: current.fiveHourRemainingPercent
+                )
                 let becameExhausted = previous.limitReached == false && current.limitReached == true
                 let hasMeaningfulDrain = weeklyDrop >= 1 || fiveHourDrop >= 5 || becameExhausted
                 guard hasMeaningfulDrain else { continue }
@@ -470,6 +479,11 @@ struct AnalyticsEngine: Sendable {
             totalDrainEvents: entries.count,
             latestEventAt: entries.first?.windowEnd
         )
+    }
+
+    private func makeDrop(previous: Int?, current: Int?) -> Int {
+        guard let previous, let current else { return 0 }
+        return max(0, previous - current)
     }
 
     private func makeUsageAuditTimeline(entries: [AnalyticsUsageAuditEntry]) -> [AnalyticsUsageAuditPoint] {

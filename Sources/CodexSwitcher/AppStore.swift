@@ -126,6 +126,8 @@ final class AppStore: ObservableObject {
     private var consecutiveFetchFailures: Int = 0
     private var paceHistory: [SessionPacePoint] = []
     private var tokenRefreshWork: DispatchWorkItem?
+    private var isTokenRefreshRunning = false
+    private var shouldRefreshTokenUsageAfterCurrentRun = false
     private var warned80PercentIds: Set<UUID> = []
     private var reloginTargetId: UUID? = nil
     private var sessionActivitySequence = 0
@@ -311,6 +313,12 @@ final class AppStore: ObservableObject {
     }
 
     func refreshTokenUsage() {
+        if isTokenRefreshRunning {
+            shouldRefreshTokenUsageAfterCurrentRun = true
+            return
+        }
+        isTokenRefreshRunning = true
+
         let profiles = self.profiles
         let history  = self.switchHistory
         let parser   = self.tokenParser
@@ -345,10 +353,19 @@ final class AppStore: ObservableObject {
             )
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                guard self.profiles.count == profiles.count else { return }
-                self.tokenUsage       = result
-                self.analyticsSnapshot = snapshot
-                self.applyCostsAndForecasts(newCosts: newCosts, newForecasts: newForecasts)
+                self.isTokenRefreshRunning = false
+                let shouldRefreshAgain = self.shouldRefreshTokenUsageAfterCurrentRun
+                self.shouldRefreshTokenUsageAfterCurrentRun = false
+
+                if self.profiles.count == profiles.count {
+                    self.tokenUsage = result
+                    self.analyticsSnapshot = snapshot
+                    self.applyCostsAndForecasts(newCosts: newCosts, newForecasts: newForecasts)
+                }
+
+                if shouldRefreshAgain {
+                    self.refreshTokenUsage()
+                }
             }
         }
     }

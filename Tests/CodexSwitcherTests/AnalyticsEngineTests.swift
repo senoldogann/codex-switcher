@@ -361,4 +361,77 @@ struct AnalyticsEngineTests {
         #expect(snapshot.usageAuditTimeline.map(\.weeklyDropPercent) == [6, 5])
         #expect(snapshot.usageAuditTimeline.map(\.idleWindow) == [true, false])
     }
+
+    @Test
+    func snapshotKeepsBudgetConfidenceDegradedWhenAnyProfileHasOldSuccessWithoutFailureFlags() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let freshProfile = Profile(alias: "Fresh", email: "fresh@example.com", accountId: "acct-fresh", addedAt: now)
+        let oldProfile = Profile(alias: "Old", email: "old@example.com", accountId: "acct-old", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .sevenDays,
+            profiles: [freshProfile, oldProfile],
+            usageRecords: [],
+            rateLimits: [:],
+            rateLimitHealth: [
+                freshProfile.id: RateLimitHealthStatus(
+                    lastCheckedAt: now,
+                    lastSuccessfulFetchAt: now.addingTimeInterval(-3600),
+                    lastFailedFetchAt: nil,
+                    lastHTTPStatusCode: nil,
+                    staleReason: nil,
+                    failureSummary: nil
+                ),
+                oldProfile.id: RateLimitHealthStatus(
+                    lastCheckedAt: now,
+                    lastSuccessfulFetchAt: now.addingTimeInterval(-48 * 3600),
+                    lastFailedFetchAt: nil,
+                    lastHTTPStatusCode: nil,
+                    staleReason: nil,
+                    failureSummary: nil
+                )
+            ],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.dataQuality.confidence == .degraded)
+        #expect(snapshot.dataQuality.lastSuccessfulFetch == now.addingTimeInterval(-48 * 3600))
+        #expect(snapshot.dataQuality.message != nil)
+    }
+
+    @Test
+    func snapshotSkipsUsageAuditDrainEventsWhenCurrentRateLimitSampleDropsMissingPercentFields() {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 77,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now,
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        #expect(snapshot.usageAuditEntries.isEmpty)
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
+    }
 }
