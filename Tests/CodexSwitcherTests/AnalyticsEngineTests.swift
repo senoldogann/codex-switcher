@@ -434,4 +434,87 @@ struct AnalyticsEngineTests {
         #expect(snapshot.usageAuditEntries.isEmpty)
         #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
     }
+
+    @Test
+    func snapshotIncludesReconciliationLedgerAndDoesNotAlertOnIgnoredRows() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 77,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now,
+                        weeklyRemainingPercent: nil,
+                        fiveHourRemainingPercent: nil,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try #require(snapshot.reconciliationEntries.first)
+        #expect(entry.status == .ignored)
+        #expect(entry.reasonCode == .missingProviderSample)
+        #expect(snapshot.reconciliationSummary.ignoredCount == 1)
+        #expect(snapshot.reconciliationSummary.unexplainedCount == 0)
+        #expect(snapshot.reconciliationPolicy == ReconciliationPolicy())
+        #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }) == false)
+    }
+
+    @Test
+    func snapshotEmitsUnexplainedDrainAlertFromReconciliationLedger() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = AnalyticsEngine(now: { now }, calendar: Calendar(identifier: .gregorian))
+
+        let snapshot = engine.makeSnapshot(
+            range: .twentyFourHours,
+            profiles: [profile],
+            usageRecords: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-3 * 3600),
+                        weeklyRemainingPercent: 82,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-2 * 3600),
+                        weeklyRemainingPercent: 71,
+                        fiveHourRemainingPercent: 100,
+                        limitReached: false
+                    )
+                ]
+            ],
+            rateLimits: [:],
+            rateLimitHealth: [:],
+            forecasts: [:]
+        )
+
+        let entry = try #require(snapshot.reconciliationEntries.first)
+        #expect(entry.status == .unexplained)
+        #expect(entry.reasonCode == .idleDrain)
+        #expect(snapshot.reconciliationSummary.unexplainedCount == 1)
+
+        let alert = try #require(snapshot.alerts.first(where: { $0.kind == .unattributedDrain }))
+        #expect(alert.severity == .critical)
+        #expect(["Idle limit drain", "Idle limit düşüşü"].contains(alert.title))
+        #expect(alert.message.contains("Alpha"))
+        #expect(alert.message.contains("11"))
+    }
 }

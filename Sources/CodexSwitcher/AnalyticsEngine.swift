@@ -64,12 +64,17 @@ struct AnalyticsEngine: Sendable {
             rateLimitHealth: rateLimitHealth,
             forecasts: forecasts
         )
-        let usageAuditEntries = makeUsageAuditEntries(
+        let reconciliationPolicy = ReconciliationPolicy()
+        let reconciliationReport = ReconciliationEngine(
+            policy: reconciliationPolicy,
+            now: { generatedAt }
+        ).makeReport(
             range: range,
             profiles: profiles,
-            records: filteredRecords,
+            records: usageRecords,
             auditSamples: auditSamples
         )
+        let usageAuditEntries = makeLegacyUsageAuditEntries(entries: reconciliationReport.entries)
         let usageAuditSummary = makeUsageAuditSummary(entries: usageAuditEntries)
         let usageAuditTimeline = makeUsageAuditTimeline(entries: usageAuditEntries)
         let dataQuality = makeDataQuality(health: rateLimitHealth)
@@ -78,7 +83,7 @@ struct AnalyticsEngine: Sendable {
             totalCost: totalCost,
             projectBreakdown: projectBreakdown,
             limitPressure: limitPressure,
-            usageAuditEntries: usageAuditEntries,
+            reconciliationEntries: reconciliationReport.entries,
             dataQuality: dataQuality,
             now: generatedAt
         )
@@ -112,6 +117,9 @@ struct AnalyticsEngine: Sendable {
             usageAuditSummary: usageAuditSummary,
             usageAuditEntries: usageAuditEntries,
             usageAuditTimeline: usageAuditTimeline,
+            reconciliationSummary: reconciliationReport.summary,
+            reconciliationEntries: reconciliationReport.entries,
+            reconciliationPolicy: reconciliationPolicy,
             alerts: alerts,
             dataQuality: dataQuality
         )
@@ -514,7 +522,7 @@ struct AnalyticsEngine: Sendable {
         totalCost: Double,
         projectBreakdown: [AnalyticsBreakdownItem],
         limitPressure: [AnalyticsLimitPressure],
-        usageAuditEntries: [AnalyticsUsageAuditEntry],
+        reconciliationEntries: [ReconciliationEntry],
         dataQuality: AnalyticsDataQuality,
         now: Date
     ) -> [AnalyticsAlert] {
@@ -622,26 +630,28 @@ struct AnalyticsEngine: Sendable {
             )
         }
 
-        if let suspiciousDrain = usageAuditEntries.first(where: { $0.status == .unattributed }) {
+        if let suspiciousDrain = reconciliationEntries.first(where: { $0.status == .unexplained }) {
+            let weeklyDropPercent = suspiciousDrain.providerWeeklyDeltaPercent ?? 0
+            let isIdleDrain = suspiciousDrain.reasonCode == .idleDrain
             alerts.append(
                 AnalyticsAlert(
                     kind: .unattributedDrain,
                     severity: .critical,
-                    title: suspiciousDrain.idleWindow
+                    title: isIdleDrain
                         ? L("Idle limit düşüşü", "Idle limit drain")
                         : L("Açıklanamayan limit düşüşü", "Unattributed limit drain"),
-                    message: suspiciousDrain.idleWindow
+                    message: isIdleDrain
                         ? L(
-                            "\(suspiciousDrain.profileName) için hiçbir local activity görünmeden haftalık kapasite %\(suspiciousDrain.weeklyDropPercent) düştü.",
-                            "\(suspiciousDrain.profileName) lost \(suspiciousDrain.weeklyDropPercent)% weekly capacity while the app observed no local activity."
+                            "\(suspiciousDrain.profileName) için hiçbir local activity görünmeden haftalık kapasite %\(weeklyDropPercent) düştü.",
+                            "\(suspiciousDrain.profileName) lost \(weeklyDropPercent)% weekly capacity while the app observed no local activity."
                         )
                         : L(
-                            "\(suspiciousDrain.profileName) için local usage görünmeden haftalık kapasite %\(suspiciousDrain.weeklyDropPercent) düştü.",
-                            "\(suspiciousDrain.profileName) lost \(suspiciousDrain.weeklyDropPercent)% weekly capacity with no local usage recorded."
+                            "\(suspiciousDrain.profileName) için local usage görünmeden haftalık kapasite %\(weeklyDropPercent) düştü.",
+                            "\(suspiciousDrain.profileName) lost \(weeklyDropPercent)% weekly capacity with no local usage recorded."
                         )
                 )
             )
-        } else if let weakDrain = usageAuditEntries.first(where: { $0.status == .weakAttribution }) {
+        } else if let weakDrain = reconciliationEntries.first(where: { $0.status == .weakAttribution }) {
             alerts.append(
                 AnalyticsAlert(
                     kind: .unattributedDrain,
@@ -679,5 +689,43 @@ struct AnalyticsEngine: Sendable {
 
     private func formatMultiple(_ value: Double) -> String {
         String(format: "%.1fx", value)
+    }
+
+    private func makeLegacyUsageAuditEntries(
+        entries: [ReconciliationEntry]
+    ) -> [AnalyticsUsageAuditEntry] {
+        entries.compactMap { entry in
+            guard entry.status != .ignored,
+                  let weeklyDropPercent = entry.providerWeeklyDeltaPercent,
+                  let fiveHourDropPercent = entry.providerFiveHourDeltaPercent else {
+                return nil
+            }
+
+            return AnalyticsUsageAuditEntry(
+                profileId: entry.profileId,
+                profileName: entry.profileName,
+                windowStart: entry.windowStart,
+                windowEnd: entry.windowEnd,
+                weeklyDropPercent: weeklyDropPercent,
+                fiveHourDropPercent: fiveHourDropPercent,
+                localTokens: entry.localTokens,
+                localSessionCount: entry.matchedSessionIds.count,
+                idleWindow: entry.reasonCode == .idleDrain,
+                status: AnalyticsUsageAuditStatus(reconciliationStatus: entry.status)
+            )
+        }
+    }
+}
+
+private extension AnalyticsUsageAuditStatus {
+    init(reconciliationStatus: ReconciliationStatus) {
+        switch reconciliationStatus {
+        case .explained:
+            self = .explained
+        case .weakAttribution:
+            self = .weakAttribution
+        case .unexplained, .ignored:
+            self = .unattributed
+        }
     }
 }

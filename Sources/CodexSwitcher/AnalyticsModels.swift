@@ -239,8 +239,59 @@ struct AnalyticsSnapshot: Equatable, Sendable {
     let usageAuditSummary: AnalyticsUsageAuditSummary
     let usageAuditEntries: [AnalyticsUsageAuditEntry]
     let usageAuditTimeline: [AnalyticsUsageAuditPoint]
+    let reconciliationSummary: ReconciliationSummary
+    let reconciliationEntries: [ReconciliationEntry]
+    let reconciliationPolicy: ReconciliationPolicy
     let alerts: [AnalyticsAlert]
     let dataQuality: AnalyticsDataQuality
+
+    init(
+        generatedAt: Date,
+        range: AnalyticsTimeRange,
+        summary: AnalyticsSummary,
+        tokenTrend: [AnalyticsTrendPoint],
+        costTrend: [AnalyticsTrendPoint],
+        dailyUsageByProfile: [UUID: [DailyUsage]],
+        accountBreakdown: [AnalyticsBreakdownItem],
+        projectBreakdown: [AnalyticsBreakdownItem],
+        modelBreakdown: [AnalyticsBreakdownItem],
+        projects: [ProjectUsage],
+        sessions: [SessionSummary],
+        hourlyActivity: [HourlyActivity],
+        expensiveTurns: [ExpensiveTurn],
+        limitPressure: [AnalyticsLimitPressure],
+        usageAuditSummary: AnalyticsUsageAuditSummary,
+        usageAuditEntries: [AnalyticsUsageAuditEntry],
+        usageAuditTimeline: [AnalyticsUsageAuditPoint],
+        reconciliationSummary: ReconciliationSummary = .empty,
+        reconciliationEntries: [ReconciliationEntry] = [],
+        reconciliationPolicy: ReconciliationPolicy = ReconciliationPolicy(),
+        alerts: [AnalyticsAlert],
+        dataQuality: AnalyticsDataQuality
+    ) {
+        self.generatedAt = generatedAt
+        self.range = range
+        self.summary = summary
+        self.tokenTrend = tokenTrend
+        self.costTrend = costTrend
+        self.dailyUsageByProfile = dailyUsageByProfile
+        self.accountBreakdown = accountBreakdown
+        self.projectBreakdown = projectBreakdown
+        self.modelBreakdown = modelBreakdown
+        self.projects = projects
+        self.sessions = sessions
+        self.hourlyActivity = hourlyActivity
+        self.expensiveTurns = expensiveTurns
+        self.limitPressure = limitPressure
+        self.usageAuditSummary = usageAuditSummary
+        self.usageAuditEntries = usageAuditEntries
+        self.usageAuditTimeline = usageAuditTimeline
+        self.reconciliationSummary = reconciliationSummary
+        self.reconciliationEntries = reconciliationEntries
+        self.reconciliationPolicy = reconciliationPolicy
+        self.alerts = alerts
+        self.dataQuality = dataQuality
+    }
 
     static func empty(for range: AnalyticsTimeRange, generatedAt: Date = Date()) -> AnalyticsSnapshot {
         AnalyticsSnapshot(
@@ -269,6 +320,9 @@ struct AnalyticsSnapshot: Equatable, Sendable {
             usageAuditSummary: .empty,
             usageAuditEntries: [],
             usageAuditTimeline: [],
+            reconciliationSummary: .empty,
+            reconciliationEntries: [],
+            reconciliationPolicy: ReconciliationPolicy(),
             alerts: [],
             dataQuality: AnalyticsDataQuality(
                 confidence: .high,

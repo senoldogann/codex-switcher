@@ -71,7 +71,7 @@ struct ReconciliationEngine: Sendable {
             let previous = sortedSamples[index - 1]
             let current = sortedSamples[index]
 
-            if let cutoff, previous.timestamp <= cutoff {
+            if let cutoff, current.timestamp <= cutoff {
                 return nil
             }
 

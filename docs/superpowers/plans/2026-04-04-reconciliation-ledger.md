@@ -94,36 +94,36 @@ Implement deterministic matching between provider sample windows and local usage
 Promote the ledger into `AnalyticsSnapshot`, make alerts derive from ledger rows, and extend CSV/JSON export with summary, entries, matched sessions, and policy metadata.
 
 **Tasks**
-- [ ] Extend `AnalyticsSnapshot` with `reconciliationSummary`, `reconciliationEntries`, and active `reconciliationPolicy`.
-- [ ] Replace existing `usageAuditEntries` alert sourcing with ledger-derived entries.
-- [ ] Keep compatibility shims only if needed for a short migration step, then remove them.
-- [ ] Extend JSON export with summary, full entry rows, matched session IDs, reason codes, confidence, and policy values.
-- [ ] Extend CSV export with the ledger table columns and stable machine-readable reason/status values.
-- [ ] Redact or omit local prompt text and full project paths from export unless explicitly needed later.
+- [x] Extend `AnalyticsSnapshot` with `reconciliationSummary`, `reconciliationEntries`, and active `reconciliationPolicy`.
+- [x] Replace existing `usageAuditEntries` alert sourcing with ledger-derived entries.
+- [x] Keep compatibility shims only if needed for a short migration step, then remove them.
+- [x] Extend JSON export with summary, full entry rows, matched session IDs, reason codes, confidence, and policy values.
+- [x] Extend CSV export with the ledger table columns and stable machine-readable reason/status values.
+- [x] Redact or omit local prompt text and full project paths from export unless explicitly needed later.
 
 **Entry Gate**
-- [ ] Phase 2 exit gate passed.
-- [ ] New ledger model and engine outputs are stable enough for snapshot wiring.
-- [ ] Existing export code paths reviewed for backward-compatibility impact.
+- [x] Phase 2 exit gate passed.
+- [x] New ledger model and engine outputs are stable enough for snapshot wiring.
+- [x] Existing export code paths reviewed for backward-compatibility impact.
 
 **Test Gate**
-- [ ] Integration: parser + reconciliation engine + `AnalyticsEngine.makeSnapshot` produce consistent ledger rows from one fixture.
-- [ ] Unit: unexplained ledger rows emit the expected alert kind/severity/title.
-- [ ] Unit: ignored rows do not emit false suspicious-drain alerts.
-- [ ] Unit: JSON/CSV export includes ledger fields and omits prompt text by default.
-- [ ] Build: `swift build -c release` passes.
+- [x] Integration: parser + reconciliation engine + `AnalyticsEngine.makeSnapshot` produce consistent ledger rows from one fixture.
+- [x] Unit: unexplained ledger rows emit the expected alert kind/severity/title.
+- [x] Unit: ignored rows do not emit false suspicious-drain alerts.
+- [x] Unit: JSON/CSV export includes ledger fields and omits prompt text by default.
+- [x] Build: `swift build -c release` passes.
 
 **Exit Gate**
-- [ ] Snapshot is the single read model for ledger UI and alerts.
-- [ ] Export contains enough forensic evidence to audit a drain window offline.
-- [ ] Legacy audit structures are either removed or clearly bounded as temporary compatibility.
+- [x] Snapshot is the single read model for ledger UI and alerts.
+- [x] Export contains enough forensic evidence to audit a drain window offline.
+- [x] Legacy audit structures are either removed or clearly bounded as temporary compatibility.
 
 **Completion Log**
-- [ ] Status:
-- [ ] Completed:
-- [ ] Test Evidence:
-- [ ] Known Gaps:
-- [ ] Next Phase:
+- [x] Status: Completed
+- [x] Completed: Wired `ReconciliationReport` into `AnalyticsSnapshot`, switched suspicious-drain alerts to ledger rows, added export-safe reconciliation JSON/CSV payloads, kept a bounded legacy audit bridge for existing UI/export compatibility, and fixed a cutoff regression so crossing windows are retained when the current sample is inside range.
+- [x] Test Evidence: `swift test` passed with 65 tests; `swift build -c release` passed; `git diff --check` clean.
+- [x] Known Gaps: Ledger UI and row drilldown are still on the old audit presentation surface; Phase 4 needs to render `reconciliationEntries` directly. Legacy `AnalyticsUsageAudit*` shims remain intentionally in place until the UI migration is complete.
+- [x] Next Phase: Phase 4 — build the ledger UI, summary strip, and selected-row drilldown on top of `reconciliationEntries` without introducing heavy SwiftUI recomputation.
 
 ---
 

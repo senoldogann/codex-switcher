@@ -225,7 +225,7 @@ struct ReconciliationEngineTests {
     }
 
     @Test
-    func makeReportIgnoresNoiseFloorWindowsAndSkipsWindowsBeforeCutoff() {
+    func makeReportIgnoresNoiseFloorWindowsAndSkipsOnlyWindowsFullyBeforeCutoff() {
         let now = Date(timeIntervalSince1970: 1_760_000_000)
         let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
         let engine = ReconciliationEngine(
@@ -267,9 +267,47 @@ struct ReconciliationEngineTests {
             ]
         )
 
-        #expect(report.entries.map(\.windowEnd) == [now.addingTimeInterval(-1_800)])
-        #expect(report.entries.first?.status == .ignored)
-        #expect(report.entries.first?.reasonCode == .belowNoiseFloor)
-        #expect(report.summary.totalWindowCount == 1)
+        #expect(report.entries.map(\.windowEnd) == [
+            now.addingTimeInterval(-1_800),
+            now.addingTimeInterval(-3_600)
+        ])
+        #expect(report.entries.allSatisfy { $0.status == .ignored })
+        #expect(report.entries.allSatisfy { $0.reasonCode == .belowNoiseFloor })
+        #expect(report.summary.totalWindowCount == 2)
+    }
+
+    @Test
+    func makeReportKeepsWindowWhenCurrentSampleIsInsideCutoff() throws {
+        let now = Date(timeIntervalSince1970: 1_760_000_000)
+        let profile = Profile(alias: "Alpha", email: "alpha@example.com", accountId: "acct-a", addedAt: now)
+        let engine = ReconciliationEngine(now: { now })
+
+        let report = engine.makeReport(
+            range: .twentyFourHours,
+            profiles: [profile],
+            records: [],
+            auditSamples: [
+                profile.id: [
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-26 * 3600),
+                        weeklyRemainingPercent: 80,
+                        fiveHourRemainingPercent: 90,
+                        limitReached: false
+                    ),
+                    RateLimitAuditSample(
+                        timestamp: now.addingTimeInterval(-23 * 3600),
+                        weeklyRemainingPercent: 70,
+                        fiveHourRemainingPercent: 85,
+                        limitReached: false
+                    )
+                ]
+            ]
+        )
+
+        let entry = try #require(report.entries.first)
+        #expect(entry.windowStart == now.addingTimeInterval(-26 * 3600))
+        #expect(entry.windowEnd == now.addingTimeInterval(-23 * 3600))
+        #expect(entry.status == .unexplained)
+        #expect(entry.providerWeeklyDeltaPercent == 10)
     }
 }
