@@ -24,6 +24,8 @@ enum AutomationConfidenceCalculator {
                 staleProfileCount: staleProfileCount,
                 fallbackRestartCount: reliability.fallbackRestartCount,
                 seamlessSuccessCount: reliability.seamlessSuccessCount,
+                blockedDecisionCount: reliability.blockedDecisionCount,
+                haltedDecisionCount: reliability.haltedDecisionCount,
                 stuckPendingSwitch: true,
                 lastVerifiedSwitchAt: lastVerifiedSwitchAt
             )
@@ -36,6 +38,8 @@ enum AutomationConfidenceCalculator {
                 staleProfileCount: staleProfileCount,
                 fallbackRestartCount: reliability.fallbackRestartCount,
                 seamlessSuccessCount: reliability.seamlessSuccessCount,
+                blockedDecisionCount: reliability.blockedDecisionCount,
+                haltedDecisionCount: reliability.haltedDecisionCount,
                 stuckPendingSwitch: false,
                 lastVerifiedSwitchAt: lastVerifiedSwitchAt
             )
@@ -52,6 +56,22 @@ enum AutomationConfidenceCalculator {
                 staleProfileCount: staleProfileCount,
                 fallbackRestartCount: reliability.fallbackRestartCount,
                 seamlessSuccessCount: reliability.seamlessSuccessCount,
+                blockedDecisionCount: reliability.blockedDecisionCount,
+                haltedDecisionCount: reliability.haltedDecisionCount,
+                stuckPendingSwitch: false,
+                lastVerifiedSwitchAt: lastVerifiedSwitchAt
+            )
+        }
+
+        if reliability.haltedDecisionCount > 0 {
+            return AutomationConfidenceSummary(
+                status: .warning,
+                highlight: "Automation could not find a safe target recently.",
+                staleProfileCount: staleProfileCount,
+                fallbackRestartCount: reliability.fallbackRestartCount,
+                seamlessSuccessCount: reliability.seamlessSuccessCount,
+                blockedDecisionCount: reliability.blockedDecisionCount,
+                haltedDecisionCount: reliability.haltedDecisionCount,
                 stuckPendingSwitch: false,
                 lastVerifiedSwitchAt: lastVerifiedSwitchAt
             )
@@ -64,6 +84,8 @@ enum AutomationConfidenceCalculator {
                 staleProfileCount: staleProfileCount,
                 fallbackRestartCount: reliability.fallbackRestartCount,
                 seamlessSuccessCount: reliability.seamlessSuccessCount,
+                blockedDecisionCount: reliability.blockedDecisionCount,
+                haltedDecisionCount: reliability.haltedDecisionCount,
                 stuckPendingSwitch: false,
                 lastVerifiedSwitchAt: lastVerifiedSwitchAt
             )
@@ -75,6 +97,8 @@ enum AutomationConfidenceCalculator {
             staleProfileCount: staleProfileCount,
             fallbackRestartCount: reliability.fallbackRestartCount,
             seamlessSuccessCount: reliability.seamlessSuccessCount,
+            blockedDecisionCount: reliability.blockedDecisionCount,
+            haltedDecisionCount: reliability.haltedDecisionCount,
             stuckPendingSwitch: false,
             lastVerifiedSwitchAt: lastVerifiedSwitchAt
         )

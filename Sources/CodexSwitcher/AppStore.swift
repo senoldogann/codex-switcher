@@ -36,6 +36,7 @@ final class AppStore: ObservableObject {
     @Published var lastSeamlessSwitchResult: SeamlessSwitchResult?
     @Published var switchReliability = SwitchReliabilitySnapshot()
     @Published var switchTimeline: [SwitchTimelineEvent] = []
+    @Published var switchDecisionHistory: [SwitchDecisionRecord] = []
     @Published var automationConfidence: AutomationConfidenceSummary = .empty
     @Published var accountReliability: [AccountReliabilitySummary] = []
 
@@ -56,6 +57,7 @@ final class AppStore: ObservableObject {
     let fetcher           = RateLimitFetcher()
     let historyStore      = SwitchHistoryStore()
     let switchTimelineStore = SwitchTimelineStore()
+    let switchDecisionStore = SwitchDecisionStore()
     let tokenParser       = SessionTokenParser()
     let analyticsEngine   = AnalyticsEngine()
     let switchDecisionPolicy = SwitchDecisionPolicy()
@@ -102,6 +104,7 @@ final class AppStore: ObservableObject {
         loadProfiles()
         switchHistory = historyStore.load()
         switchTimeline = switchTimelineStore.load()
+        switchDecisionHistory = switchDecisionStore.load()
         refreshReliabilityAnalytics()
 
         usageMonitor.onRateLimit = { [weak self] in
@@ -276,21 +279,16 @@ final class AppStore: ObservableObject {
     // MARK: - Smart Switch
 
     func smartNextProfile(auto: Bool) -> Profile? {
-        let candidates = profiles.filter { $0.id != activeProfile?.id }
-        guard !candidates.isEmpty else { return nil }
-
+        let evaluation = makeSwitchReadinessEvaluation()
+        let preferredId: UUID?
         if auto {
-            return switchDecisionPolicy.nextAutomaticCandidate(
-                profiles: profiles,
-                activeProfileId: activeProfile?.id,
-                rateLimits: rateLimits
-            )
+            preferredId = evaluation.candidates.first(where: { $0.status == .ready })?.profileId
+                ?? evaluation.preferredCandidateId
+        } else {
+            preferredId = evaluation.preferredCandidateId
         }
-        return switchDecisionPolicy.nextManualCandidate(
-            profiles: profiles,
-            activeProfileId: activeProfile?.id,
-            rateLimits: rateLimits
-        ) ?? candidates.first(where: { rateLimits[$0.id] == nil })
+        guard let preferredId else { return nil }
+        return profiles.first { $0.id == preferredId }
     }
 
     // MARK: - Switching
@@ -299,46 +297,128 @@ final class AppStore: ObservableObject {
         captureUsageForActive()
         let isAuto = reason.contains(L("Limit", "Limit"))
         guard let candidate = smartNextProfile(auto: isAuto) else {
+            if isAuto {
+                recordSwitchDecision(
+                    requestedProfile: nil,
+                    chosenProfile: nil,
+                    source: .automatic,
+                    outcome: .halted,
+                    reason: reason,
+                    detail: L("Güvenli hedef bulunamadı.", "No safe target was available."),
+                    overrideApplied: false
+                )
+                switchOrchestrator.recordHaltedDecision(
+                    reason: reason,
+                    detail: L("Hiçbir hesap güvenli hedef olarak seçilemedi.", "No account qualified as a safe switch target.")
+                )
+                syncSwitchOrchestrationState()
+            }
             allExhausted = true
             sendNotification(title: Str.allExhausted, body: L("Limitler sıfırlanınca devam eder.", "Will resume when limits reset."))
             return
         }
-        activateCandidate(candidate, reason: reason)
+        activateCandidate(candidate, reason: reason, source: isAuto ? .automatic : .manual, overrideApplied: false)
     }
 
     func switchTo(profile: Profile) {
         captureUsageForActive()
-        guard switchDecisionPolicy.isEligibleCandidate(rateLimits[profile.id]) else {
+        let evaluation = makeSwitchReadinessEvaluation()
+        let readiness = evaluation.candidates.first(where: { $0.profileId == profile.id })
+        let isSafe = readiness?.status == .ready || readiness?.status == .warning
+        guard isSafe else {
+            recordSwitchDecision(
+                requestedProfile: profile,
+                chosenProfile: profile,
+                source: .manual,
+                outcome: .manualOverride,
+                reason: L("Manuel seçim", "Manual selection"),
+                detail: manualSwitchBlockedMessage(for: profile, rateLimit: rateLimits[profile.id]),
+                overrideApplied: true,
+                evaluation: evaluation
+            )
+            switchOrchestrator.recordBlockedDecision(
+                targetProfileName: profile.displayName,
+                reason: L("Manuel override", "Manual override"),
+                detail: L(
+                    "Güvensiz hedef uyarı ile seçildi; manuel override uygulandı.",
+                    "Unsafe target was selected with a warning; manual override was applied."
+                )
+            )
+            syncSwitchOrchestrationState()
             sendNotification(
-                title: L("Hesap uygun değil", "Account is not eligible"),
+                title: L("Dikkatli geçiş", "Proceeding with caution"),
                 body: manualSwitchBlockedMessage(for: profile, rateLimit: rateLimits[profile.id])
             )
+            switchTo(profile: profile, reason: L("Manuel override", "Manual override"), source: .manual, overrideApplied: true)
             return
         }
-        switchTo(profile: profile, reason: L("Manuel seçim", "Manual selection"))
+        switchTo(profile: profile, reason: L("Manuel seçim", "Manual selection"), source: .manual, overrideApplied: false)
     }
 
     func switchTo(profile: Profile, reason: String) {
-        activateCandidate(profile, reason: reason)
+        switchTo(profile: profile, reason: reason, source: .manual, overrideApplied: false)
     }
 
-    private func activateCandidate(_ candidate: Profile, reason: String) {
+    func switchTo(
+        profile: Profile,
+        reason: String,
+        source: SwitchDecisionSource,
+        overrideApplied: Bool
+    ) {
+        activateCandidate(profile, reason: reason, source: source, overrideApplied: overrideApplied)
+    }
+
+    private func activateCandidate(
+        _ candidate: Profile,
+        reason: String,
+        source: SwitchDecisionSource,
+        overrideApplied: Bool
+    ) {
         // NOTE: history is written in finalizeActivation, NOT here.
         // Writing before we know activation succeeded would permanently corrupt analytics
         // attribution (the parser treats history as authoritative for token ownership).
+        let evaluation = makeSwitchReadinessEvaluation()
         do {
             lastAuthWriteDate = Date()
             let verifyResult = try profileManager.activate(profile: candidate)
 
             switch verifyResult {
             case .verified:
-                finalizeActivation(candidate, reason: reason)
+                finalizeActivation(
+                    candidate,
+                    reason: reason,
+                    source: source,
+                    overrideApplied: overrideApplied,
+                    evaluation: evaluation
+                )
             case .failed:
                 let retryResult = profileManager.verifyActiveAccount(expectedAccountId: candidate.accountId)
                 switch retryResult {
                 case .verified:
-                    finalizeActivation(candidate, reason: reason)
+                    finalizeActivation(
+                        candidate,
+                        reason: reason,
+                        source: source,
+                        overrideApplied: overrideApplied,
+                        evaluation: evaluation
+                    )
                 case .failed:
+                    recordSwitchDecision(
+                        requestedProfile: candidate,
+                        chosenProfile: candidate,
+                        source: source,
+                        outcome: .blocked,
+                        reason: reason,
+                        detail: L("Hesap doğrulanamadı.", "Account verification failed."),
+                        overrideApplied: overrideApplied,
+                        evaluation: evaluation
+                    )
+                    switchOrchestrator.recordBlockedDecision(
+                        targetProfileName: candidate.displayName,
+                        reason: reason,
+                        detail: L("Hedef hesap doğrulanamadı.", "Target account could not be verified.")
+                    )
+                    syncSwitchOrchestrationState()
                     sendNotification(
                         title: L("Geçiş başarısız", "Switch failed"),
                         body: L("Hesap doğrulanamadı. Lütfen tekrar deneyin.", "Account verification failed. Please try again.")
@@ -346,6 +426,22 @@ final class AppStore: ObservableObject {
                 }
             }
         } catch {
+            recordSwitchDecision(
+                requestedProfile: candidate,
+                chosenProfile: candidate,
+                source: source,
+                outcome: .blocked,
+                reason: reason,
+                detail: error.localizedDescription,
+                overrideApplied: overrideApplied,
+                evaluation: evaluation
+            )
+            switchOrchestrator.recordBlockedDecision(
+                targetProfileName: candidate.displayName,
+                reason: reason,
+                detail: error.localizedDescription
+            )
+            syncSwitchOrchestrationState()
             sendNotification(title: L("Geçiş başarısız", "Switch failed"), body: error.localizedDescription)
         }
     }
@@ -365,7 +461,13 @@ final class AppStore: ObservableObject {
         )
     }
 
-    private func finalizeActivation(_ candidate: Profile, reason: String) {
+    private func finalizeActivation(
+        _ candidate: Profile,
+        reason: String,
+        source: SwitchDecisionSource,
+        overrideApplied: Bool,
+        evaluation: SwitchReadinessEvaluation
+    ) {
         // Write history ONLY after verified activation to keep analytics attribution clean.
         let event = SwitchEvent(
             id: UUID(),
@@ -378,6 +480,16 @@ final class AppStore: ObservableObject {
         )
         historyStore.append(event)
         switchHistory = historyStore.load()
+        recordSwitchDecision(
+            requestedProfile: candidate,
+            chosenProfile: candidate,
+            source: source,
+            outcome: overrideApplied ? .manualOverride : .executed,
+            reason: reason,
+            detail: L("Hedef hesap doğrulandı ve aktif edildi.", "Target account was verified and activated."),
+            overrideApplied: overrideApplied,
+            evaluation: evaluation
+        )
 
         var config = profileManager.loadConfig()
         if let i = config.profiles.firstIndex(where: { $0.id == candidate.id }) {
@@ -397,6 +509,43 @@ final class AppStore: ObservableObject {
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
         attemptSeamlessSwitch(for: candidate)
+    }
+
+    func makeSwitchReadinessEvaluation() -> SwitchReadinessEvaluation {
+        SwitchReadinessEvaluator(policy: switchDecisionPolicy).evaluate(
+            profiles: profiles,
+            activeProfileId: activeProfile?.id,
+            rateLimits: rateLimits,
+            staleProfileIds: staleProfileIds
+        )
+    }
+
+    func recordSwitchDecision(
+        requestedProfile: Profile?,
+        chosenProfile: Profile?,
+        source: SwitchDecisionSource,
+        outcome: SwitchDecisionOutcome,
+        reason: String,
+        detail: String,
+        overrideApplied: Bool,
+        evaluation: SwitchReadinessEvaluation? = nil
+    ) {
+        let record = SwitchDecisionRecord(
+            id: UUID(),
+            timestamp: Date(),
+            source: source,
+            outcome: outcome,
+            requestedProfileId: requestedProfile?.id,
+            requestedProfileName: requestedProfile?.displayName,
+            chosenProfileId: chosenProfile?.id,
+            chosenProfileName: chosenProfile?.displayName,
+            reason: reason,
+            detail: detail,
+            overrideApplied: overrideApplied,
+            readiness: (evaluation ?? makeSwitchReadinessEvaluation()).candidates
+        )
+        switchDecisionStore.append(record)
+        switchDecisionHistory = switchDecisionStore.load()
     }
 
     // MARK: - AI Restart

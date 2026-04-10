@@ -22,6 +22,8 @@ struct AutomationAlertPolicyTests {
             staleProfileCount: 1,
             fallbackRestartCount: 0,
             seamlessSuccessCount: 2,
+            blockedDecisionCount: 0,
+            haltedDecisionCount: 0,
             stuckPendingSwitch: false,
             lastVerifiedSwitchAt: nil
         )
@@ -43,6 +45,8 @@ struct AutomationAlertPolicyTests {
             staleProfileCount: 0,
             fallbackRestartCount: 1,
             seamlessSuccessCount: 0,
+            blockedDecisionCount: 0,
+            haltedDecisionCount: 0,
             stuckPendingSwitch: true,
             lastVerifiedSwitchAt: nil
         )

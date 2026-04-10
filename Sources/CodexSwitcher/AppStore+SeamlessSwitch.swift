@@ -20,6 +20,20 @@ extension AppStore {
     func queuePendingSwitch(reason: String) {
         guard switchOrchestrator.pendingRequest == nil else { return }
         guard let candidate = smartNextProfile(auto: true) else {
+            recordSwitchDecision(
+                requestedProfile: nil,
+                chosenProfile: nil,
+                source: .automatic,
+                outcome: .halted,
+                reason: reason,
+                detail: L("Kuyruğa alınacak güvenli hedef bulunamadı.", "No safe target was available to queue."),
+                overrideApplied: false
+            )
+            switchOrchestrator.recordHaltedDecision(
+                reason: reason,
+                detail: L("Otomatik geçiş güvenli hedef bulamadığı için durduruldu.", "Automatic switching halted because no safe target was available.")
+            )
+            syncSwitchOrchestrationState()
             allExhausted = true
             sendNotification(title: Str.allExhausted, body: L("Limitler sıfırlanınca devam eder.", "Will resume when limits reset."))
             return
@@ -34,6 +48,15 @@ extension AppStore {
         _ = switchOrchestrator.queue(
             request: request,
             detail: L("Aktif iş bitene kadar geçiş ertelendi.", "Switch was deferred until the active work finished.")
+        )
+        recordSwitchDecision(
+            requestedProfile: candidate,
+            chosenProfile: candidate,
+            source: .automatic,
+            outcome: .queued,
+            reason: reason,
+            detail: L("Geçiş aktif iş bitene kadar kuyruğa alındı.", "Switch was queued until the active work finished."),
+            overrideApplied: false
         )
         syncSwitchOrchestrationState()
     }

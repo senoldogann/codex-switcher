@@ -43,7 +43,9 @@ struct AutomationConfidenceTests {
                 completedDeferredSwitchCount: 2,
                 seamlessSuccessCount: 1,
                 inconclusiveCount: 0,
-                fallbackRestartCount: 3
+                fallbackRestartCount: 3,
+                blockedDecisionCount: 0,
+                haltedDecisionCount: 0
             ),
             pendingSwitchRequest: nil,
             switchTimeline: [],
@@ -68,7 +70,9 @@ struct AutomationConfidenceTests {
                 completedDeferredSwitchCount: 1,
                 seamlessSuccessCount: 4,
                 inconclusiveCount: 1,
-                fallbackRestartCount: 0
+                fallbackRestartCount: 0,
+                blockedDecisionCount: 0,
+                haltedDecisionCount: 0
             ),
             pendingSwitchRequest: nil,
             switchTimeline: [
@@ -89,6 +93,33 @@ struct AutomationConfidenceTests {
         #expect(summary.status == .healthy)
         #expect(summary.highlight.contains("healthy"))
         #expect(summary.lastVerifiedSwitchAt == now.addingTimeInterval(-30))
+    }
+
+    @Test
+    func summaryWarnsWhenAutomationRecentlyHalted() {
+        let now = Date(timeIntervalSince1970: 1_700_010_250)
+        let summary = AutomationConfidenceCalculator.buildSummary(
+            profiles: [
+                Profile(alias: "Account 1", email: "one@example.com", accountId: "acc-1", addedAt: now)
+            ],
+            staleProfileIds: [],
+            rateLimitHealth: [:],
+            reliability: SwitchReliabilitySnapshot(
+                pendingSwitchCount: 0,
+                completedDeferredSwitchCount: 0,
+                seamlessSuccessCount: 1,
+                inconclusiveCount: 0,
+                fallbackRestartCount: 0,
+                blockedDecisionCount: 0,
+                haltedDecisionCount: 1
+            ),
+            pendingSwitchRequest: nil,
+            switchTimeline: [],
+            now: now
+        )
+
+        #expect(summary.status == .warning)
+        #expect(summary.highlight.contains("safe target"))
     }
 
     @Test
