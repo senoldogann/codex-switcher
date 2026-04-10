@@ -87,6 +87,10 @@ If a Codex file is missing or a schema changes, the app should narrow functional
 
 Each phase must be shippable on its own, without requiring the later phases to justify the architecture.
 
+### 6. Performance Tiering
+
+The app is a menu bar utility first. Lightweight status rendering must not depend on heavyweight diagnostics or graph ingestion. New architecture must preserve fast startup, predictable refresh behavior, and cancellable background work.
+
 ## Architecture Overview
 
 The expanded product should be organized into four layers:
@@ -98,12 +102,40 @@ The expanded product should be organized into four layers:
    Compute derived state such as reliability scores, anomaly reports, thread graphs, and workflow summaries.
 
 3. **Snapshots**
-   Produce UI-ready snapshots for the menu bar, analytics window, and future diagnostics views.
+   Produce UI-ready snapshots at different cost tiers for the menu bar, analytics window, and future diagnostics views.
 
 4. **Presentation**
    Render focused views with consistent language around confidence, health, evidence, and actionability.
 
 This continues the current direction already visible in the analytics snapshot architecture and should be extended rather than replaced.
+
+## Snapshot Strategy
+
+The product should keep one normalized domain layer, but should not force every UI surface through one heavyweight snapshot.
+
+Required snapshot tiers:
+
+- `MenuSnapshot`
+  - lightweight
+  - fast to compute
+  - refreshes on a tight cadence
+  - limited to active profile state, readiness, session activity, and compact alerts
+- `AnalyticsSnapshot`
+  - medium weight
+  - refreshes less often or on explicit interaction
+  - powers cost, usage, reconciliation, and higher-level summaries
+- `DiagnosticsSnapshot`
+  - heavy and on-demand
+  - only built when a diagnostics or thread-intelligence surface is visible
+  - supports cancellation, partial loading, cursor-based progression, and stale-data indicators
+
+Shared rules:
+
+- collectors feed one normalized domain layer
+- snapshots compose from normalized records instead of hitting disk directly
+- long-running refresh work must happen off the menu-rendering path
+- each snapshot tier must define refresh cadence, cancellation behavior, and cache lifetime
+- startup must prefer a fast cached snapshot over blocking on deep recomputation
 
 ## Data Sources
 
@@ -182,6 +214,17 @@ Turn switching into an explainable orchestration system instead of a thin action
 
 Add a dedicated reliability domain around switching rather than continuing to grow `AppStore` directly. The orchestration result should be represented as typed records that can feed both history and diagnostics views.
 
+### Phase 1 boundary
+
+Phase 1 should stay grounded in existing inputs already trusted by the product:
+
+- auth state
+- rate-limit fetch state
+- session activity state
+- local switch history and timeline
+
+Phase 1 may introduce a minimal evidence and event record model for switch decisions, queue transitions, verification outcomes, and rollback reasons. It should not depend on cross-source log correlation from `logs_2.sqlite` or workflow correlation from `state_5.sqlite`. Those remain Phase 2 and Phase 3 work.
+
 ## Phase 2: Deep Analytics + Forensics
 
 ### Objective
@@ -230,6 +273,16 @@ Expose how Codex actually works over time at the thread, job, and agent level.
 
 This phase needs a separate thread/workflow ingestion and derivation path. It should remain read-only and schema-tolerant. Any feature relying on uncertain SQLite schema details should carry a guarded capability flag.
 
+### Phase 3 v1 limits
+
+To keep the first thread/workflow release bounded:
+
+- require repo and time-range filters before rendering heavy views
+- cap graph rendering to a fixed node and edge budget
+- show summary cards instead of a graph when limits are exceeded
+- represent missing parents, duplicate edges, and incomplete joins explicitly in the UI
+- allow cost overlays only when correlation confidence reaches an explicit threshold
+
 ## Phase 4: Daily UX + Power-User Features
 
 ### Objective
@@ -272,6 +325,23 @@ Create explicit models for:
 
 These models should be version-tolerant and fail clearly when required fields are unavailable.
 
+### SQLite Adapter Safety
+
+All SQLite-based collectors must follow strict adapter rules:
+
+- open databases in read-only mode
+- tolerate concurrent writers and WAL-backed databases
+- detect table and column availability before queries run
+- compute schema fingerprints for supported structures
+- disable unsupported capabilities when required fields drift
+- fail closed for user-facing claims when correlation confidence is too weak
+
+Validation requirements:
+
+- keep fixture databases sampled from real local Codex data
+- add regression coverage for supported schema fingerprints
+- surface partial-capability states in the UI instead of silently downgrading evidence
+
 ### Capability Detection
 
 The app should detect which Codex artifacts are present and which features can safely run:
@@ -287,6 +357,8 @@ This allows future Codex app changes without catastrophic UI failure.
 
 Derived views should be composed from one central snapshot flow rather than each view reading disk independently.
 
+This means one normalized domain layer, not one monolithic UI snapshot.
+
 ### Confidence and Evidence Language
 
 All new UI surfaces should use consistent wording such as:
@@ -296,6 +368,25 @@ All new UI surfaces should use consistent wording such as:
 - weak evidence
 - unavailable
 - not enough local data
+
+## Data Classification and Privacy
+
+New diagnostics and export features must preserve the current trust boundary of the product.
+
+Default policy:
+
+- redact prompt text
+- redact raw local repo paths
+- redact auth identifiers and account secrets
+- redact raw runtime log payloads unless the user explicitly opts in
+
+Export rules:
+
+- standard exports remain privacy-bounded by default
+- richer forensic bundles require explicit user opt-in
+- export UI must preview which sensitive classes are included
+- retention expectations should be visible before export completes
+- later imports or share flows must assume exported bundles can leave the local machine
 
 ## Risks
 
