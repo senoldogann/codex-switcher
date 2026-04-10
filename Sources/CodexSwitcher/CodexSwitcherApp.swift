@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
+    private let notificationPermissionBootstrapper = NotificationPermissionBootstrapper()
     private var store: AppStore { AppStore.shared }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -46,6 +47,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         updateStatusLabel()
+
+        notificationPermissionBootstrapper.scheduleInitialRequest {
+            Task { @MainActor in
+                AppStore.shared.requestNotificationPermissionIfNeeded()
+            }
+        }
     }
 
     // MARK: - Status Item

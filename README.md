@@ -155,6 +155,11 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.2.2
+- **Launch crash fix** — Moved the notification permission request out of `AppStore` initialization so the menu bar app no longer aborts during early startup on some macOS setups
+- **Safer permission bootstrap** — Notification authorization is now requested from a deferred, one-shot launch bootstrap instead of eager singleton construction
+- **Regression coverage** — Added targeted tests for deferred notification permission scheduling and single-run gating
+
 ### v2.1.4
 - **Reconciliation ledger UI** — The analytics window now shows a sortable forensic ledger with summary pills, reason codes, confidence labels, and row drilldown
 - **Forensic export hardening** — CSV/JSON exports now carry reconciliation rows and policy metadata without prompt text or local project paths

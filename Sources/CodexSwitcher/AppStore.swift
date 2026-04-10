@@ -89,6 +89,7 @@ final class AppStore: ObservableObject {
     var analyticsWindow: NSWindow?
     var addAccountWindow: NSWindow?
     var rateLimitAuditSamples: [UUID: [RateLimitAuditSample]] = [:]
+    var notificationPermissionGate = NotificationPermissionGate()
 
     enum AddingStep { case idle, waitingLogin, confirmProfile, done }
 
@@ -102,7 +103,6 @@ final class AppStore: ObservableObject {
         switchHistory = historyStore.load()
         switchTimeline = switchTimelineStore.load()
         refreshReliabilityAnalytics()
-        requestNotificationPermission()
 
         usageMonitor.onRateLimit = { [weak self] in
             Task { @MainActor in self?.handleRateLimitDetected() }
@@ -493,8 +493,10 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    func requestNotificationPermissionIfNeeded() {
+        notificationPermissionGate.runIfNeeded {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     func sendNotification(title: String, body: String) {
