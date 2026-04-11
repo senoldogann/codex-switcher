@@ -155,6 +155,14 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.2.3
+- **Switch reliability foundation** — Added typed switch decision records, readiness evaluation, bounded decision persistence, and safer manual override behavior so automatic and manual switching are both more explainable
+- **Unified diagnostics timeline** — Added a diagnostics layer that merges switch decisions, automation events, reconciliation anomalies, alerts, and data-quality signals into one bounded operational timeline
+- **Workflow intelligence** — Added read-only local Codex thread intelligence from `state_5.sqlite` with recent thread activity, repo hot spots, and open spawn-edge visibility in the analytics window
+- **Power-user guidance** — Added contextual next-action recommendations and remembered analytics history tab state so returning users can move faster through the app
+- **Diagnostics export expansion** — JSON audit exports now include diagnostics summary and timeline data without leaking prompt text or local project paths
+- **Regression coverage** — Added targeted tests for diagnostics timeline generation, workflow summary loading, recommendation logic, and expanded analytics export payloads
+
 ### v2.2.2
 - **Launch crash fix** — Moved the notification permission request out of `AppStore` initialization so the menu bar app no longer aborts during early startup on some macOS setups
 - **Safer permission bootstrap** — Notification authorization is now requested from a deferred, one-shot launch bootstrap instead of eager singleton construction
