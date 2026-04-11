@@ -22,6 +22,7 @@ struct AnalyticsWindowView: View {
                 summaryBand
                 trendSection
                 breakdownSection
+                workflowSection
                 limitPressureSection
                 reconciliationSection
                 diagnosticsSection
@@ -66,6 +67,18 @@ struct AnalyticsWindowView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(gw.opacity(0.3))
                     }
+                }
+
+                if let recommendation = store.powerUserRecommendation {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recommendation.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(gw.opacity(0.76))
+                        Text(recommendation.detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(gw.opacity(0.38))
+                    }
+                    .padding(.top, 2)
                 }
             }
 
@@ -385,6 +398,89 @@ struct AnalyticsWindowView: View {
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(cardBackground)
+                }
+            }
+        }
+    }
+
+    private var workflowSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: L("Workflow intelligence", "Workflow intelligence"),
+                subtitle: L("Yerel thread ve repo davranışı", "Local thread and repo behavior")
+            )
+
+            if snapshot.workflowSummary.totalActiveThreads == 0 {
+                emptyCardLabel
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(cardBackground)
+            } else {
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        summaryMiniPill(label: L("Thread", "Threads"), value: "\(snapshot.workflowSummary.totalActiveThreads)", tint: .blue)
+                        summaryMiniPill(label: L("Open edges", "Open edges"), value: "\(snapshot.workflowSummary.openSpawnEdges)", tint: .orange)
+                        summaryMiniPill(label: L("Tokens", "Tokens"), value: formatTokens(snapshot.workflowSummary.totalThreadTokens), tint: .green)
+                        Spacer()
+                    }
+
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("Top repos", "Top repos"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(gw.opacity(0.76))
+                            ForEach(snapshot.workflowSummary.repoInsights) { insight in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(insight.displayName)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(gw.opacity(0.8))
+                                        Text(insight.cwd)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(gw.opacity(0.28))
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text(formatTokens(insight.totalTokens))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(gw.opacity(0.42))
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("Recent threads", "Recent threads"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(gw.opacity(0.76))
+                            ForEach(snapshot.workflowSummary.recentThreads, id: \.threadId) { thread in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(thread.titlePreview)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(gw.opacity(0.8))
+                                        .lineLimit(2)
+                                    HStack(spacing: 8) {
+                                        diagnosticCapsule(thread.model.isEmpty ? "unknown-model" : thread.model)
+                                        if !thread.gitBranch.isEmpty {
+                                            diagnosticCapsule(thread.gitBranch)
+                                        }
+                                        Text(formatTokens(thread.tokensUsed))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(gw.opacity(0.32))
+                                        Spacer()
+                                        Text(thread.updatedAt, style: .relative)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(gw.opacity(0.28))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+                    }
                 }
             }
         }

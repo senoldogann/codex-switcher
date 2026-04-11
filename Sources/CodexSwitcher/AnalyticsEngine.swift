@@ -26,6 +26,7 @@ struct AnalyticsEngine: Sendable {
         auditSamples: [UUID: [RateLimitAuditSample]] = [:],
         switchDecisionHistory: [SwitchDecisionRecord] = [],
         switchTimeline: [SwitchTimelineEvent] = [],
+        workflowSummary: WorkflowSummary = .empty,
         rateLimits: [UUID: RateLimitInfo],
         rateLimitHealth: [UUID: RateLimitHealthStatus],
         forecasts: [UUID: RateLimitForecast]
@@ -124,6 +125,7 @@ struct AnalyticsEngine: Sendable {
             sessions: insights.sessions,
             hourlyActivity: insights.hourlyActivity,
             expensiveTurns: insights.expensiveTurns,
+            workflowSummary: workflowSummary,
             limitPressure: limitPressure,
             usageAuditSummary: usageAuditSummary,
             usageAuditEntries: usageAuditEntries,

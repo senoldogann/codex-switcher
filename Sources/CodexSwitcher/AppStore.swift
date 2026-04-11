@@ -48,6 +48,14 @@ final class AppStore: ObservableObject {
         updateStatus.state == .updateAvailable ? updateStatus.release : nil
     }
 
+    var powerUserRecommendation: PowerUserRecommendation? {
+        PowerUserRecommendationEngine.build(
+            automation: automationConfidence,
+            diagnostics: analyticsSnapshot.diagnosticsSummary,
+            workflow: analyticsSnapshot.workflowSummary
+        )
+    }
+
     static let turnsLimit    = 50
     static let switchCooldown: TimeInterval = 60
 
@@ -58,6 +66,7 @@ final class AppStore: ObservableObject {
     let historyStore      = SwitchHistoryStore()
     let switchTimelineStore = SwitchTimelineStore()
     let switchDecisionStore = SwitchDecisionStore()
+    let codexStateStore = CodexStateStore()
     let tokenParser       = SessionTokenParser()
     let analyticsEngine   = AnalyticsEngine()
     let switchDecisionPolicy = SwitchDecisionPolicy()

@@ -8,8 +8,9 @@ struct MenuContentView: View {
     @State private var appeared = false
     @State var screen: NavScreen = .main
     @State var historyTab: HistoryTab = .list
+    @AppStorage("historyTab") private var storedHistoryTab: String = HistoryTab.list.rawValue
 
-    enum HistoryTab { case list, chart, projects, sessions, heatmap, expensive }
+    enum HistoryTab: String { case list, chart, projects, sessions, heatmap, expensive }
 
     @AppStorage("emailsBlurred") var emailsBlurred: Bool = false
     @AppStorage("isDarkMode")    var isDarkMode: Bool = true
@@ -41,10 +42,16 @@ struct MenuContentView: View {
         .opacity(appeared ? 1 : 0)
         .preferredColorScheme(isDarkMode ? .dark : .light)
         .onAppear {
+            if let persisted = HistoryTab(rawValue: storedHistoryTab) {
+                historyTab = persisted
+            }
             withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) { appeared = true }
         }
         .onChange(of: isDarkMode) { _, _ in
             NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+        }
+        .onChange(of: historyTab) { _, newValue in
+            storedHistoryTab = newValue.rawValue
         }
         // MARK: Keyboard Shortcuts ⌘1–⌘9
         .background(
@@ -137,6 +144,19 @@ struct MenuContentView: View {
                     .font(.system(size: 9))
                     .foregroundStyle(gw.opacity(0.3))
                     .lineLimit(2)
+            }
+
+            if let recommendation = store.powerUserRecommendation {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recommendation.title)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.74))
+                    Text(recommendation.detail)
+                        .font(.system(size: 9))
+                        .foregroundStyle(gw.opacity(0.34))
+                        .lineLimit(2)
+                }
+                .padding(.top, 2)
             }
         }
         .padding(.horizontal, 14)

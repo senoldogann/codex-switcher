@@ -235,6 +235,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
     let sessions: [SessionSummary]
     let hourlyActivity: [HourlyActivity]
     let expensiveTurns: [ExpensiveTurn]
+    let workflowSummary: WorkflowSummary
     let limitPressure: [AnalyticsLimitPressure]
     let usageAuditSummary: AnalyticsUsageAuditSummary
     let usageAuditEntries: [AnalyticsUsageAuditEntry]
@@ -261,6 +262,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         sessions: [SessionSummary],
         hourlyActivity: [HourlyActivity],
         expensiveTurns: [ExpensiveTurn],
+        workflowSummary: WorkflowSummary = .empty,
         limitPressure: [AnalyticsLimitPressure],
         usageAuditSummary: AnalyticsUsageAuditSummary,
         usageAuditEntries: [AnalyticsUsageAuditEntry],
@@ -286,6 +288,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         self.sessions = sessions
         self.hourlyActivity = hourlyActivity
         self.expensiveTurns = expensiveTurns
+        self.workflowSummary = workflowSummary
         self.limitPressure = limitPressure
         self.usageAuditSummary = usageAuditSummary
         self.usageAuditEntries = usageAuditEntries
@@ -322,6 +325,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
             sessions: [],
             hourlyActivity: [],
             expensiveTurns: [],
+            workflowSummary: .empty,
             limitPressure: [],
             usageAuditSummary: .empty,
             usageAuditEntries: [],
