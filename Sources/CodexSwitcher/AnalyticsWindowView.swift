@@ -24,6 +24,7 @@ struct AnalyticsWindowView: View {
                 breakdownSection
                 limitPressureSection
                 reconciliationSection
+                diagnosticsSection
                 alertsSection
             }
             .padding(24)
@@ -441,6 +442,69 @@ struct AnalyticsWindowView: View {
         }
     }
 
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: L("Diagnostics", "Diagnostics"),
+                subtitle: L("Birleşik operasyon zaman çizelgesi", "Unified operational timeline")
+            )
+
+            if snapshot.diagnosticsTimeline.isEmpty {
+                emptyCardLabel
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(cardBackground)
+            } else {
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        summaryMiniPill(label: L("Toplam", "Total"), value: "\(snapshot.diagnosticsSummary.totalCount)", tint: .blue)
+                        summaryMiniPill(label: L("Warning", "Warning"), value: "\(snapshot.diagnosticsSummary.warningCount)", tint: .orange)
+                        summaryMiniPill(label: L("Critical", "Critical"), value: "\(snapshot.diagnosticsSummary.criticalCount)", tint: .red)
+                        Spacer()
+                    }
+                    .padding(.bottom, 4)
+
+                    ForEach(snapshot.diagnosticsTimeline.prefix(12)) { event in
+                        HStack(alignment: .top, spacing: 12) {
+                            Circle()
+                                .fill(diagnosticsColor(event.severity).opacity(0.9))
+                                .frame(width: 10, height: 10)
+                                .padding(.top, 4)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(event.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(gw.opacity(0.82))
+                                    if let subject = event.subject, !subject.isEmpty {
+                                        Text(subject)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(gw.opacity(0.38))
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text(event.timestamp, style: .relative)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(gw.opacity(0.3))
+                                }
+                                HStack(spacing: 8) {
+                                    diagnosticCapsule(event.kind.rawValue)
+                                    diagnosticCapsule(event.severity.rawValue)
+                                }
+                                Text(event.detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(gw.opacity(0.48))
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+                    }
+                }
+            }
+        }
+    }
+
     private func sectionHeader(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -523,6 +587,37 @@ struct AnalyticsWindowView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(gw.opacity(0.56))
         }
+    }
+
+    private func diagnosticsColor(_ severity: DiagnosticsEventSeverity) -> Color {
+        switch severity {
+        case .info: return .blue
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private func summaryMiniPill(label: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(gw.opacity(0.34))
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.85))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(gw.opacity(0.06)))
+    }
+
+    private func diagnosticCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(gw.opacity(0.4))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(gw.opacity(0.05)))
     }
 
     private func exportButton(title: String, type: UTType, content: @escaping () throws -> String) -> some View {

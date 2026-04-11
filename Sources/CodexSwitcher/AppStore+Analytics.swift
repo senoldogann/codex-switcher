@@ -21,6 +21,8 @@ extension AppStore {
         let rateLimitHealth = self.rateLimitHealth
         let paceHistory     = self.paceHistory
         let auditSamples    = self.rateLimitAuditSamples
+        let switchDecisionHistory = self.switchDecisionHistory
+        let switchTimeline = self.switchTimeline
 
         DispatchQueue.global(qos: .utility).async {
             let result        = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
@@ -40,6 +42,8 @@ extension AppStore {
                 dailyUsageByProfile: daily,
                 sessionRecords: sessionRecords,
                 auditSamples: auditSamples,
+                switchDecisionHistory: switchDecisionHistory,
+                switchTimeline: switchTimeline,
                 rateLimits: rateLimits,
                 rateLimitHealth: rateLimitHealth,
                 forecasts: newForecasts
