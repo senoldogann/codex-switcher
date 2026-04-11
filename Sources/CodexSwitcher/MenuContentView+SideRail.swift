@@ -55,6 +55,16 @@ extension MenuContentView {
                 railDivider
 
                 updateRailButton
+
+                railDivider
+
+                railButton(
+                    "paintbrush.pointed",
+                    L("Ayarlar", "Settings"),
+                    selected: screen == .settings
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .settings }
+                }
             }
             .padding(.top, 6)
 
@@ -71,12 +81,6 @@ extension MenuContentView {
 
                 railButton("eye", emailsBlurred ? Str.showEmail : Str.hideEmail) {
                     withAnimation(.easeInOut(duration: 0.2)) { emailsBlurred.toggle() }
-                }
-
-                railDivider
-
-                railButton(isDarkMode ? "moon.fill" : "sun.max", isDarkMode ? Str.dark : Str.light) {
-                    isDarkMode.toggle()
                 }
 
                 railDivider
@@ -163,9 +167,9 @@ extension MenuContentView {
     func railButtonBody(icon: String, label: String, selected: Bool, foreground: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                .font(appearance.font(size: 12, weight: selected ? .semibold : .medium))
             Text(label)
-                .font(.system(size: 7, weight: selected ? .semibold : .medium))
+                .font(appearance.font(size: 7, weight: selected ? .semibold : .medium))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
@@ -175,7 +179,7 @@ extension MenuContentView {
         .foregroundStyle(foreground)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? gw.opacity(0.06) : .clear)
+                .fill(selected ? appearance.selectionFill : .clear)
         )
         .padding(.horizontal, 6)
         .contentShape(Rectangle())

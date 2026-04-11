@@ -156,6 +156,9 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 ## Changelog
 
 ### v2.2.3
+- **Drag-to-reorder accounts** — Account rows in the menu can now be picked up and moved anywhere in the stack, with the new order persisted across launches
+- **Appearance settings screen** — Added a dedicated Settings view with theme mode, text size, text family, accent color presets, and a live preview card
+- **Theme-aware menu polish** — Menu highlights, active indicators, progress bars, and analytics summary accents now follow the selected appearance preset
 - **Switch reliability foundation** — Added typed switch decision records, readiness evaluation, bounded decision persistence, and safer manual override behavior so automatic and manual switching are both more explainable
 - **Unified diagnostics timeline** — Added a diagnostics layer that merges switch decisions, automation events, reconciliation anomalies, alerts, and data-quality signals into one bounded operational timeline
 - **Workflow intelligence** — Added read-only local Codex thread intelligence from `state_5.sqlite` with recent thread activity, repo hot spots, and open spawn-edge visibility in the analytics window

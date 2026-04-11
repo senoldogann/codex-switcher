@@ -8,8 +8,20 @@ struct AnalyticsWindowView: View {
     @Environment(\.colorScheme) private var scheme
 
     @AppStorage("isDarkMode") private var isDarkMode: Bool = true
+    @AppStorage("appearanceTextScale") private var appearanceTextScaleRaw: String = AppearanceTextScale.medium.rawValue
+    @AppStorage("appearanceFontFamily") private var appearanceFontFamilyRaw: String = AppearanceFontFamily.system.rawValue
+    @AppStorage("appearanceThemePreset") private var appearanceThemePresetRaw: String = AppearanceThemePreset.emerald.rawValue
 
-    private var gw: Color { scheme == .dark ? .white : .black }
+    private var appearance: AppAppearance {
+        AppAppearance(
+            isDarkMode: isDarkMode,
+            textScale: AppearanceTextScale(rawValue: appearanceTextScaleRaw) ?? .medium,
+            fontFamily: AppearanceFontFamily(rawValue: appearanceFontFamilyRaw) ?? .system,
+            themePreset: AppearanceThemePreset(rawValue: appearanceThemePresetRaw) ?? .emerald
+        )
+    }
+
+    private var gw: Color { appearance.foregroundColor }
     private var snapshot: AnalyticsSnapshot { store.analyticsSnapshot }
 
     var body: some View {
@@ -30,17 +42,20 @@ struct AnalyticsWindowView: View {
             }
             .padding(24)
         }
+        .tint(appearance.accentColor)
         .background(
             LinearGradient(
                 colors: [
                     scheme == .dark ? Color.black.opacity(0.92) : Color.white.opacity(0.94),
-                    scheme == .dark ? Color(red: 0.08, green: 0.09, blue: 0.13) : Color(red: 0.93, green: 0.95, blue: 0.98)
+                    scheme == .dark
+                        ? appearance.accentSecondaryColor.opacity(0.16)
+                        : appearance.accentSecondaryColor.opacity(0.12)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .preferredColorScheme(isDarkMode ? .dark : .light)
+        .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 920, minHeight: 680)
     }
 
@@ -48,23 +63,23 @@ struct AnalyticsWindowView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Analitik", "Analytics"))
-                    .font(.system(size: 28, weight: .bold))
+                    .font(appearance.font(size: 28, weight: .bold))
                     .foregroundStyle(gw.opacity(0.92))
                 Text(L("Maliyet kontrolü ve operasyon görünürlüğü", "Cost control and operational visibility"))
-                    .font(.system(size: 13))
+                    .font(appearance.font(size: 13))
                     .foregroundStyle(gw.opacity(0.46))
 
                 HStack(spacing: 10) {
                     Text(L("Son başarılı fetch:", "Last successful fetch:"))
-                        .font(.system(size: 11, weight: .medium))
+                        .font(appearance.font(size: 11, weight: .medium))
                         .foregroundStyle(gw.opacity(0.34))
                     if let lastSuccessfulFetch = snapshot.dataQuality.lastSuccessfulFetch {
                         Text(lastSuccessfulFetch.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(appearance.monospacedFont(size: 11))
                             .foregroundStyle(gw.opacity(0.62))
                     } else {
                             Text(L("Henüz yok", "Not available yet"))
-                            .font(.system(size: 11))
+                            .font(appearance.font(size: 11))
                             .foregroundStyle(gw.opacity(0.3))
                     }
                 }
@@ -72,10 +87,10 @@ struct AnalyticsWindowView: View {
                 if let recommendation = store.powerUserRecommendation {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(recommendation.title)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(appearance.font(size: 11, weight: .semibold))
                             .foregroundStyle(gw.opacity(0.76))
                         Text(recommendation.detail)
-                            .font(.system(size: 11))
+                            .font(appearance.font(size: 11))
                             .foregroundStyle(gw.opacity(0.38))
                     }
                     .padding(.top, 2)
@@ -100,13 +115,13 @@ struct AnalyticsWindowView: View {
                     store.refreshTokenUsage()
                 } label: {
                     Label(L("Yenile", "Refresh"), systemImage: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(appearance.font(size: 12, weight: .medium))
                         .foregroundStyle(gw.opacity(0.8))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(
                             Capsule()
-                                .fill(gw.opacity(0.08))
+                                .fill(appearance.subtleFill)
                         )
                 }
                 .buttonStyle(.plain)
@@ -119,7 +134,7 @@ struct AnalyticsWindowView: View {
             Image(systemName: confidence == .low ? "exclamationmark.triangle.fill" : "info.circle.fill")
                 .foregroundStyle(confidence == .low ? .orange : .yellow)
             Text(message)
-                .font(.system(size: 12))
+                .font(appearance.font(size: 12))
                 .foregroundStyle(gw.opacity(0.72))
             Spacer()
         }
@@ -161,18 +176,18 @@ struct AnalyticsWindowView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundStyle(gw.opacity(0.58))
+                    .foregroundStyle(appearance.accentColor.opacity(0.8))
                 Spacer()
                 Text(title)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(appearance.font(size: 10, weight: .medium))
                     .foregroundStyle(gw.opacity(0.34))
             }
             Text(primary)
-                .font(.system(size: 18, weight: .semibold))
+                .font(appearance.font(size: 18, weight: .semibold))
                 .foregroundStyle(gw.opacity(0.9))
                 .lineLimit(1)
             Text(secondary)
-                .font(.system(size: 11))
+                .font(appearance.font(size: 11))
                 .foregroundStyle(gw.opacity(0.38))
                 .lineLimit(1)
         }
@@ -188,14 +203,14 @@ struct AnalyticsWindowView: View {
                 points: snapshot.tokenTrend,
                 value: \.tokens,
                 formatter: formatTokens(_:),
-                tint: .cyan
+                tint: appearance.accentSecondaryColor
             )
             trendCard(
                 title: L("Maliyet trendi", "Cost trend"),
                 points: snapshot.costTrend,
                 value: \.cost,
                 formatter: CostCalculator.format(_:),
-                tint: .orange
+                tint: appearance.accentColor
             )
         }
     }
