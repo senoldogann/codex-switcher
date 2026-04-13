@@ -30,7 +30,7 @@ A macOS menu bar app that manages multiple OpenAI Codex accounts, automatically 
 - **Auto-switching** — Detects weekly and 5-hour pressure via API and switches to the best available account automatically
 - **Smart selection** — Picks the account with the lowest weekly usage %, not round-robin
 - **Proactive thresholds** — Leaves the active account before hard exhaustion at `weekly <= 5%` or `5-hour <= 7%`
-- **Restart-guaranteed cutover** — When Codex is active, the app restarts it on switch so the new account is actually applied
+- **Background cutover refresh** — When Codex is active, the app refreshes its bundled background runtime on switch so the new account is actually applied without closing the window
 - **Switch verification** — Switch telemetry records queued, restarted, and fallback states for postmortems
 - **Re-login flow** — Refresh stale tokens without leaving the app
 - **Account aliases** — Friendly names per account, rename via right-click
@@ -117,7 +117,7 @@ What it does:
 2. On detection it calls the rate-limit API to **confirm** the limit is actually reached (no false positives)
 3. If confirmed, it atomically replaces `~/.codex/auth.json` with the best available account
 4. If work is still active, the switch is queued until a safe boundary is reached
-5. If work is still active, CodexSwitcher restarts Codex during switch so the new account is guaranteed to take effect
+5. If Codex is active, CodexSwitcher refreshes the bundled background runtime during switch so the new account is guaranteed to take effect without closing the window
 6. Analytics keeps a reconciliation ledger so provider-side limit drops can be compared against local activity later
 
 Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_tokens` from each session's JSONL events and maps them to the account that was active at that timestamp.
@@ -155,11 +155,19 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
-### v2.2.3
+### v2.2.4
 - **Background Codex refresh** — Account switching now refreshes Codex's bundled app-server in the background so the window stays open while the new account is loaded
 - **Limit-stuck recovery** — Switched accounts no longer depend on a full visible Codex relaunch to escape stale `you hit limit` local sessions
-- **Version metadata sync** — Bundle version now matches the published `v2.2.3` release again
+- **Drag-to-reorder accounts** — Account rows in the menu can now be picked up and moved anywhere in the stack, with the new order persisted across launches
+- **Appearance settings screen** — Added a dedicated Settings view with theme mode, text size, text family, accent color presets, and a live preview card
+- **Theme-aware menu polish** — Menu highlights, active indicators, progress bars, and analytics summary accents now follow the selected appearance preset
+- **Switch reliability foundation** — Added typed switch decision records, readiness evaluation, bounded decision persistence, and safer manual override behavior so automatic and manual switching are both more explainable
+- **Unified diagnostics timeline** — Added a diagnostics layer that merges switch decisions, automation events, reconciliation anomalies, alerts, and data-quality signals into one bounded operational timeline
+- **Workflow intelligence** — Added read-only local Codex thread intelligence from `state_5.sqlite` with recent thread activity, repo hot spots, and open spawn-edge visibility in the analytics window
+- **Power-user guidance** — Added contextual next-action recommendations and remembered analytics history tab state so returning users can move faster through the app
+- **Diagnostics export expansion** — JSON audit exports now include diagnostics summary and timeline data without leaking prompt text or local project paths
 - **Midnight session counting fix** — Session usage tracking now scans day boundaries correctly, fixing the release-blocking cache regression test around midnight
+- **Regression coverage** — Added targeted tests for diagnostics timeline generation, workflow summary loading, recommendation logic, expanded analytics export payloads, and corrected session-usage caching behavior
 
 ### v2.2.2
 - **Launch crash fix** — Moved the notification permission request out of `AppStore` initialization so the menu bar app no longer aborts during early startup on some macOS setups

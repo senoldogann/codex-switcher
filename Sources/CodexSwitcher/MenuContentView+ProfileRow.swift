@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Profile Row
 
@@ -16,7 +17,7 @@ extension MenuContentView {
             if let rl = store.rateLimits[profile.id] {
                 if rl.limitReached { return .red }
                 if let weekly = rl.weeklyRemainingPercent, weekly <= 0 { return .red }
-                return .green
+                return appearance.accentColor
             }
             return .gray
         }()
@@ -41,28 +42,28 @@ extension MenuContentView {
                     // Name row
                     HStack(spacing: 5) {
                         Text(profile.displayName)
-                            .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                            .font(appearance.font(size: 13, weight: isActive ? .semibold : .regular))
                             .foregroundStyle(isActive ? gw : gw.opacity(0.6))
                             .lineLimit(1)
 
                         if isActive {
                             Circle()
-                                .fill(Color.green)
+                                .fill(appearance.accentColor)
                                 .frame(width: 5, height: 5)
-                                .shadow(color: store.isSessionActive ? .green : .clear, radius: 4)
+                                .shadow(color: store.isSessionActive ? appearance.accentColor : .clear, radius: 4)
                                 .opacity(store.isSessionActive ? 0.8 : 0.5)
                         }
 
                         if let rl = store.rateLimit(for: profile), rl.limitReached {
                             Image(systemName: "lock.fill")
-                                .font(.system(size: 8))
+                                .font(appearance.font(size: 8))
                                 .foregroundStyle(.red.opacity(0.6))
                         }
                     }
 
                     // Email — blurrable
                     Text(profile.email)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(appearance.monospacedFont(size: 10))
                         .foregroundStyle(gw.opacity(0.4))
                         .lineLimit(1)
                         .blur(radius: emailsBlurred ? 5 : 0)
@@ -77,7 +78,7 @@ extension MenuContentView {
                     if let health = store.rateLimitHealth[profile.id],
                        let line = healthLine(for: health, profileId: profile.id) {
                         Text(line)
-                            .font(.system(size: 9))
+                            .font(appearance.font(size: 9))
                             .foregroundStyle(gw.opacity(0.25))
                             .lineLimit(1)
                     }
@@ -89,10 +90,10 @@ extension MenuContentView {
                     if let cost = store.costs[profile.id], cost > 0 {
                         HStack(spacing: 4) {
                             Image(systemName: "dollarsign.circle.fill")
-                                .font(.system(size: 8))
+                                .font(appearance.font(size: 8))
                                 .foregroundStyle(gw.opacity(0.3))
                             Text(CostCalculator.format(cost))
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(appearance.monospacedFont(size: 9))
                                 .foregroundStyle(gw.opacity(0.35))
                         }
                     }
@@ -104,11 +105,11 @@ extension MenuContentView {
                                 .fill(Color(forecast.riskLevel.color))
                                 .frame(width: 6, height: 6)
                             Text(forecast.riskLevel.label)
-                                .font(.system(size: 9, weight: .medium))
+                                .font(appearance.font(size: 9, weight: .medium))
                                 .foregroundStyle(gw.opacity(0.35))
                             if !forecast.timeToExhaustionLabel.isEmpty {
                                 Text(forecast.timeToExhaustionLabel)
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(appearance.monospacedFont(size: 9))
                                     .foregroundStyle(gw.opacity(0.3))
                             }
                         }
@@ -118,7 +119,7 @@ extension MenuContentView {
                 Spacer(minLength: 0)
 
                 Image(systemName: isActive ? "checkmark" : "chevron.right")
-                    .font(.system(size: isActive ? 11 : 10, weight: isActive ? .semibold : .regular))
+                    .font(appearance.font(size: isActive ? 11 : 10, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? gw.opacity(0.45) : gw.opacity(0.2))
             }
             .padding(.horizontal, 14)
@@ -126,13 +127,18 @@ extension MenuContentView {
             .contentShape(Rectangle())
             .background(
                 isActive
-                    ? gw.opacity(0.055)
+                    ? appearance.selectionFill
                     : hoveredId == profile.id ? gw.opacity(0.035) : Color.clear
             )
         }
         .buttonStyle(.plain)
         .pointerCursor()
         .onHover { h in hoveredId = h ? profile.id : nil }
+        .opacity(draggedProfileId == profile.id ? 0.55 : 1)
+        .onDrag {
+            draggedProfileId = profile.id
+            return NSItemProvider(object: profile.id.uuidString as NSString)
+        }
         .contextMenu {
             if store.staleProfileIds.contains(profile.id) {
                 Button {
@@ -175,7 +181,7 @@ extension MenuContentView {
     func limitRow(label: String, percent: Int, resetLabel: String, critical: Bool, isRemaining: Bool = false) -> some View {
         HStack(spacing: 6) {
             Text(label)
-                .font(.system(size: 9, weight: .medium))
+                .font(appearance.font(size: 9, weight: .medium))
                 .foregroundStyle(gw.opacity(0.38))
                 .frame(width: 40, alignment: .leading)
 
@@ -187,7 +193,7 @@ extension MenuContentView {
                               ? LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
                               : LinearGradient(
                                   colors: isRemaining
-                                      ? [Color.green.opacity(0.8), Color.green.opacity(0.5)]
+                                      ? [appearance.accentColor.opacity(0.8), appearance.accentSecondaryColor.opacity(0.5)]
                                       : [gw.opacity(0.6), gw.opacity(0.4)],
                                   startPoint: .leading, endPoint: .trailing))
                         .frame(width: max(geo.size.width * Double(percent) / 100, percent > 0 ? 3 : 0))
@@ -196,13 +202,13 @@ extension MenuContentView {
             .frame(width: 60, height: 3)
 
             Text("\(percent)%")
-                .font(.system(size: 9, design: .monospaced))
+                .font(appearance.monospacedFont(size: 9))
                 .foregroundStyle(critical ? .orange : gw.opacity(0.38))
                 .frame(width: 26, alignment: .trailing)
 
             if !resetLabel.isEmpty {
                 Text(resetLabel)
-                    .font(.system(size: 9))
+                    .font(appearance.font(size: 9))
                     .foregroundStyle(gw.opacity(0.3))
             }
         }
@@ -213,25 +219,25 @@ extension MenuContentView {
     func tokenUsageRow(_ u: AccountTokenUsage) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "cpu")
-                .font(.system(size: 8))
+                .font(appearance.font(size: 8))
                 .foregroundStyle(gw.opacity(0.3))
             Text("\(formatTokens(u.totalTokens)) tokens")
-                .font(.system(size: 9, design: .monospaced))
+                .font(appearance.monospacedFont(size: 9))
                 .foregroundStyle(gw.opacity(0.32))
             if let topModel = u.modelUsage.max(by: { $0.value.totalTokens < $1.value.totalTokens })?.key {
                 Text("· \(topModel)")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(appearance.monospacedFont(size: 9))
                     .foregroundStyle(gw.opacity(0.22))
             }
             if u.cachedInputTokens > 0 {
                 Text("·").foregroundStyle(gw.opacity(0.2))
                 Text("\(formatTokens(u.cachedInputTokens)) cached")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(appearance.monospacedFont(size: 9))
                     .foregroundStyle(gw.opacity(0.22))
             }
             if u.sessionCount > 1 {
                 Text("· \(u.sessionCount) sess")
-                    .font(.system(size: 9))
+                    .font(appearance.font(size: 9))
                     .foregroundStyle(gw.opacity(0.22))
             }
         }
@@ -263,7 +269,7 @@ extension MenuContentView {
                     RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                         .fill(Color(white: 0.12))
                     Image(systemName: "sparkle")
-                        .font(.system(size: size * 0.4, weight: .medium))
+                        .font(appearance.font(size: size * 0.4, weight: .medium))
                         .foregroundStyle(Color(white: 0.6))
                 }
                 .frame(width: size, height: size)

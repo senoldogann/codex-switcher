@@ -21,6 +21,9 @@ extension AppStore {
         let rateLimitHealth = self.rateLimitHealth
         let paceHistory     = self.paceHistory
         let auditSamples    = self.rateLimitAuditSamples
+        let switchDecisionHistory = self.switchDecisionHistory
+        let switchTimeline = self.switchTimeline
+        let codexStateStore = self.codexStateStore
 
         DispatchQueue.global(qos: .utility).async {
             let result        = parser.calculate(profiles: profiles, history: history, activeProfileId: activeProfileId)
@@ -33,6 +36,7 @@ extension AppStore {
                 rateLimits: rateLimits,
                 paceHistory: paceHistory
             )
+            let workflowSummary = codexStateStore.loadWorkflowSummary(range: range, now: Date())
             let snapshot = engine.makeSnapshot(
                 range: range,
                 profiles: profiles,
@@ -40,6 +44,9 @@ extension AppStore {
                 dailyUsageByProfile: daily,
                 sessionRecords: sessionRecords,
                 auditSamples: auditSamples,
+                switchDecisionHistory: switchDecisionHistory,
+                switchTimeline: switchTimeline,
+                workflowSummary: workflowSummary,
                 rateLimits: rateLimits,
                 rateLimitHealth: rateLimitHealth,
                 forecasts: newForecasts

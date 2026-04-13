@@ -247,6 +247,7 @@ struct AnalyticsEngineTests {
         #expect(snapshot.usageAuditSummary.idleDrainCount == 1)
         #expect(snapshot.usageAuditSummary.unattributedCount == 1)
         #expect(snapshot.alerts.contains(where: { $0.kind == .unattributedDrain }))
+        #expect(snapshot.diagnosticsTimeline.contains(where: { $0.kind == .reconciliation }))
     }
 
     @Test

@@ -24,6 +24,9 @@ struct AnalyticsEngine: Sendable {
         dailyUsageByProfile: [UUID: [DailyUsage]] = [:],
         sessionRecords: [AnalyticsSessionRecord] = [],
         auditSamples: [UUID: [RateLimitAuditSample]] = [:],
+        switchDecisionHistory: [SwitchDecisionRecord] = [],
+        switchTimeline: [SwitchTimelineEvent] = [],
+        workflowSummary: WorkflowSummary = .empty,
         rateLimits: [UUID: RateLimitInfo],
         rateLimitHealth: [UUID: RateLimitHealthStatus],
         forecasts: [UUID: RateLimitForecast]
@@ -87,6 +90,15 @@ struct AnalyticsEngine: Sendable {
             dataQuality: dataQuality,
             now: generatedAt
         )
+        let diagnosticsTimeline = DiagnosticsEngine().makeTimeline(
+            switchDecisions: switchDecisionHistory,
+            switchTimeline: switchTimeline,
+            reconciliationEntries: reconciliationReport.entries,
+            alerts: alerts,
+            dataQuality: dataQuality,
+            generatedAt: generatedAt
+        )
+        let diagnosticsSummary = DiagnosticsEngine().makeSummary(events: diagnosticsTimeline)
         let summary = AnalyticsSummary(
             totalTokens: totalTokens,
             estimatedTotalCost: totalCost,
@@ -113,6 +125,7 @@ struct AnalyticsEngine: Sendable {
             sessions: insights.sessions,
             hourlyActivity: insights.hourlyActivity,
             expensiveTurns: insights.expensiveTurns,
+            workflowSummary: workflowSummary,
             limitPressure: limitPressure,
             usageAuditSummary: usageAuditSummary,
             usageAuditEntries: usageAuditEntries,
@@ -121,6 +134,8 @@ struct AnalyticsEngine: Sendable {
             reconciliationEntries: reconciliationReport.entries,
             reconciliationPolicy: reconciliationPolicy,
             alerts: alerts,
+            diagnosticsSummary: diagnosticsSummary,
+            diagnosticsTimeline: diagnosticsTimeline,
             dataQuality: dataQuality
         )
     }

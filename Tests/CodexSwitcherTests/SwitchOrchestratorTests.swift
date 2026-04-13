@@ -187,4 +187,33 @@ struct SwitchOrchestratorTests {
         #expect(orchestrator.timelineEvents.last?.targetProfileName == "Account 7")
         #expect(orchestrator.timelineEvents.last?.verificationDurationSeconds == nil)
     }
+
+    @Test
+    func recordBlockedDecisionTracksReliabilityAndTimeline() {
+        var orchestrator = SwitchOrchestrator()
+
+        orchestrator.recordBlockedDecision(
+            targetProfileName: "Account 9",
+            reason: "Manual override",
+            detail: "Target was unsafe."
+        )
+
+        #expect(orchestrator.reliability.blockedDecisionCount == 1)
+        #expect(orchestrator.timelineEvents.last?.stage == .blocked)
+        #expect(orchestrator.timelineEvents.last?.targetProfileName == "Account 9")
+    }
+
+    @Test
+    func recordHaltedDecisionTracksReliabilityAndTimeline() {
+        var orchestrator = SwitchOrchestrator()
+
+        orchestrator.recordHaltedDecision(
+            reason: "Limit reached",
+            detail: "No safe target was available."
+        )
+
+        #expect(orchestrator.reliability.haltedDecisionCount == 1)
+        #expect(orchestrator.timelineEvents.last?.stage == .halted)
+        #expect(orchestrator.timelineEvents.last?.targetProfileName == "Automation")
+    }
 }

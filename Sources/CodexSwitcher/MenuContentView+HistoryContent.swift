@@ -31,7 +31,7 @@ extension MenuContentView {
             Group {
                 switch historyTab {
                 case .list:
-                    if store.switchHistory.isEmpty && store.switchTimeline.isEmpty {
+                    if store.switchHistory.isEmpty && store.switchTimeline.isEmpty && store.switchDecisionHistory.isEmpty {
                         Text(Str.noHistory)
                             .font(.system(size: 12))
                             .foregroundStyle(gw.opacity(0.35))
@@ -43,6 +43,13 @@ extension MenuContentView {
                                     sectionLabel(Str.automation)
                                     ForEach(Array(store.switchTimeline.reversed().prefix(12))) { event in
                                         timelineRow(event)
+                                        Divider().background(gw.opacity(0.05))
+                                    }
+                                }
+                                if !store.switchDecisionHistory.isEmpty {
+                                    sectionLabel(L("Kararlar", "Decisions"))
+                                    ForEach(Array(store.switchDecisionHistory.reversed().prefix(8))) { decision in
+                                        decisionRow(decision)
                                         Divider().background(gw.opacity(0.05))
                                     }
                                 }
@@ -115,6 +122,7 @@ extension MenuContentView {
             summaryPill(label: Str.queued,   value: "\(store.switchReliability.pendingSwitchCount)",   tint: .orange)
             summaryPill(label: Str.seamless, value: "\(store.switchReliability.seamlessSuccessCount)", tint: .green)
             summaryPill(label: Str.fallback, value: "\(store.switchReliability.fallbackRestartCount)", tint: .blue)
+            summaryPill(label: L("Blok", "Blocked"), value: "\(store.switchReliability.blockedDecisionCount)", tint: .red)
             Spacer(minLength: 0)
             if let lastResult = store.lastSeamlessSwitchResult {
                 Text(switchOutcomeLabel(lastResult.outcome))
@@ -198,6 +206,8 @@ extension MenuContentView {
             case .seamlessSuccess: return "bolt.horizontal.circle.fill"
             case .fallbackRestart: return "arrow.clockwise.circle.fill"
             case .inconclusive:   return "questionmark.circle"
+            case .blocked:        return "xmark.circle.fill"
+            case .halted:         return "stop.circle.fill"
             }
         }()
         let tint: Color = {
@@ -208,6 +218,8 @@ extension MenuContentView {
             case .seamlessSuccess: return .green
             case .fallbackRestart: return .blue
             case .inconclusive:   return gw
+            case .blocked:        return .red
+            case .halted:         return .pink
             }
         }()
 
@@ -245,6 +257,49 @@ extension MenuContentView {
                     }
                     if let verification = event.verificationDurationSeconds {
                         metricCapsule(label: Str.verify, value: "\(verification)s")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    func decisionRow(_ decision: SwitchDecisionRecord) -> some View {
+        let tint = decisionOutcomeColor(decision.outcome)
+        return HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle().fill(tint.opacity(0.12)).frame(width: 26, height: 26)
+                Image(systemName: decisionOutcomeIcon(decision.outcome))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(tint.opacity(0.85))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Text(decisionOutcomeLabel(decision.outcome))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(gw.opacity(0.74))
+                    if let chosen = decision.chosenProfileName {
+                        Text(chosen)
+                            .font(.system(size: 10))
+                            .foregroundStyle(gw.opacity(0.42))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Text(decision.timestamp, style: .relative)
+                        .font(.system(size: 9))
+                        .foregroundStyle(gw.opacity(0.24))
+                }
+                Text(decision.detail)
+                    .font(.system(size: 9))
+                    .foregroundStyle(gw.opacity(0.3))
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    metricCapsule(label: Str.reason, value: decision.reason)
+                    metricCapsule(label: L("Kaynak", "Source"), value: decision.source.rawValue)
+                    if decision.overrideApplied {
+                        metricCapsule(label: L("Override", "Override"), value: L("Evet", "Yes"))
                     }
                 }
             }
@@ -319,6 +374,38 @@ extension MenuContentView {
         case .seamlessSuccess: return Str.seamless
         case .fallbackRestart: return Str.fallbackRestart
         case .inconclusive:   return Str.inconclusive
+        case .blocked:        return L("Bloklandı", "Blocked")
+        case .halted:         return L("Durdu", "Halted")
+        }
+    }
+
+    func decisionOutcomeLabel(_ outcome: SwitchDecisionOutcome) -> String {
+        switch outcome {
+        case .queued:         return L("Kuyruğa alındı", "Queued")
+        case .executed:       return L("Çalıştırıldı", "Executed")
+        case .blocked:        return L("Bloklandı", "Blocked")
+        case .halted:         return L("Durdu", "Halted")
+        case .manualOverride: return L("Manuel override", "Manual override")
+        }
+    }
+
+    func decisionOutcomeIcon(_ outcome: SwitchDecisionOutcome) -> String {
+        switch outcome {
+        case .queued:         return "pause.circle.fill"
+        case .executed:       return "checkmark.circle.fill"
+        case .blocked:        return "xmark.circle.fill"
+        case .halted:         return "stop.circle.fill"
+        case .manualOverride: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    func decisionOutcomeColor(_ outcome: SwitchDecisionOutcome) -> Color {
+        switch outcome {
+        case .queued:         return .orange
+        case .executed:       return .green
+        case .blocked:        return .red
+        case .halted:         return .pink
+        case .manualOverride: return .yellow
         }
     }
 }

@@ -103,6 +103,8 @@ struct AnalyticsAuditExporterTests {
         let summary = try #require(object["usageAuditSummary"] as? [String: Any])
         let entries = try #require(object["usageAuditEntries"] as? [[String: Any]])
         let timeline = try #require(object["usageAuditTimeline"] as? [[String: Any]])
+        let diagnosticsSummary = try #require(object["diagnosticsSummary"] as? [String: Any])
+        let diagnosticsTimeline = try #require(object["diagnosticsTimeline"] as? [[String: Any]])
         let firstEntry = try #require(entries.first)
         let firstTimelinePoint = try #require(timeline.first)
 
@@ -111,6 +113,8 @@ struct AnalyticsAuditExporterTests {
         #expect(firstEntry["status"] as? String == "unattributed")
         #expect(firstEntry["idleWindow"] as? Bool == true)
         #expect(firstTimelinePoint["weeklyDropPercent"] as? Int == 8)
+        #expect(diagnosticsSummary["totalCount"] as? Int == 0)
+        #expect(diagnosticsTimeline.isEmpty)
     }
 
     @Test
@@ -202,6 +206,8 @@ struct AnalyticsAuditExporterTests {
         let entries = try #require(object["reconciliationEntries"] as? [[String: Any]])
         let entryPayload = try #require(entries.first)
         let policy = try #require(object["reconciliationPolicy"] as? [String: Any])
+        let diagnosticsSummary = try #require(object["diagnosticsSummary"] as? [String: Any])
+        let diagnosticsTimeline = try #require(object["diagnosticsTimeline"] as? [[String: Any]])
 
         #expect(summary["weakAttributionCount"] as? Int == 1)
         #expect(entryPayload["status"] as? String == "weakAttribution")
@@ -210,6 +216,8 @@ struct AnalyticsAuditExporterTests {
         #expect((entryPayload["matchedSessionIds"] as? [String]) == ["s-1"])
         #expect(policy["skewToleranceSeconds"] as? Int == 120)
         #expect(policy["minFiveHourDrainPercent"] as? Int == 5)
+        #expect(diagnosticsSummary["totalCount"] as? Int == 0)
+        #expect(diagnosticsTimeline.isEmpty)
 
         #expect(json.contains("promptPreview") == false)
         #expect(json.contains("projectPath") == false)

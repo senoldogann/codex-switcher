@@ -108,6 +108,8 @@ struct SwitchReliabilitySnapshot: Equatable {
     var seamlessSuccessCount: Int = 0
     var inconclusiveCount: Int = 0
     var fallbackRestartCount: Int = 0
+    var blockedDecisionCount: Int = 0
+    var haltedDecisionCount: Int = 0
 }
 
 struct SwitchTimelineEvent: Codable, Identifiable, Equatable {
@@ -118,6 +120,8 @@ struct SwitchTimelineEvent: Codable, Identifiable, Equatable {
         case seamlessSuccess
         case fallbackRestart
         case inconclusive
+        case blocked
+        case halted
     }
 
     let id: UUID
@@ -142,6 +146,8 @@ struct AutomationConfidenceSummary: Equatable {
     let staleProfileCount: Int
     let fallbackRestartCount: Int
     let seamlessSuccessCount: Int
+    let blockedDecisionCount: Int
+    let haltedDecisionCount: Int
     let stuckPendingSwitch: Bool
     let lastVerifiedSwitchAt: Date?
 
@@ -151,6 +157,8 @@ struct AutomationConfidenceSummary: Equatable {
         staleProfileCount: 0,
         fallbackRestartCount: 0,
         seamlessSuccessCount: 0,
+        blockedDecisionCount: 0,
+        haltedDecisionCount: 0,
         stuckPendingSwitch: false,
         lastVerifiedSwitchAt: nil
     )

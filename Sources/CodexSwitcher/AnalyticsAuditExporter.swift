@@ -70,6 +70,8 @@ private struct AnalyticsAuditPayload: Encodable {
     let reconciliationSummary: ReconciliationSummaryPayload
     let reconciliationEntries: [ReconciliationEntryPayload]
     let reconciliationPolicy: ReconciliationPolicyPayload
+    let diagnosticsSummary: DiagnosticsSummaryPayload
+    let diagnosticsTimeline: [DiagnosticsEventPayload]
 
     init(snapshot: AnalyticsSnapshot) {
         generatedAt = snapshot.generatedAt
@@ -80,6 +82,8 @@ private struct AnalyticsAuditPayload: Encodable {
         reconciliationSummary = ReconciliationSummaryPayload(summary: snapshot.reconciliationSummary)
         reconciliationEntries = snapshot.reconciliationEntries.map(ReconciliationEntryPayload.init)
         reconciliationPolicy = ReconciliationPolicyPayload(policy: snapshot.reconciliationPolicy)
+        diagnosticsSummary = DiagnosticsSummaryPayload(summary: snapshot.diagnosticsSummary)
+        diagnosticsTimeline = snapshot.diagnosticsTimeline.map(DiagnosticsEventPayload.init)
     }
 }
 
@@ -210,5 +214,37 @@ private struct ReconciliationPolicyPayload: Encodable {
         minDrainPercent = policy.minDrainPercent
         minFiveHourDrainPercent = policy.minFiveHourDrainPercent
         lowLocalTokenThreshold = policy.lowLocalTokenThreshold
+    }
+}
+
+private struct DiagnosticsSummaryPayload: Encodable {
+    let totalCount: Int
+    let warningCount: Int
+    let criticalCount: Int
+    let latestEventAt: Date?
+
+    init(summary: DiagnosticsSummary) {
+        totalCount = summary.totalCount
+        warningCount = summary.warningCount
+        criticalCount = summary.criticalCount
+        latestEventAt = summary.latestEventAt
+    }
+}
+
+private struct DiagnosticsEventPayload: Encodable {
+    let timestamp: Date
+    let kind: String
+    let severity: String
+    let title: String
+    let detail: String
+    let subject: String?
+
+    init(event: DiagnosticsEvent) {
+        timestamp = event.timestamp
+        kind = event.kind.rawValue
+        severity = event.severity.rawValue
+        title = event.title
+        detail = event.detail
+        subject = event.subject
     }
 }

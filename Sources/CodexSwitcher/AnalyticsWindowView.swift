@@ -8,8 +8,20 @@ struct AnalyticsWindowView: View {
     @Environment(\.colorScheme) private var scheme
 
     @AppStorage("isDarkMode") private var isDarkMode: Bool = true
+    @AppStorage("appearanceTextScale") private var appearanceTextScaleRaw: String = AppearanceTextScale.medium.rawValue
+    @AppStorage("appearanceFontFamily") private var appearanceFontFamilyRaw: String = AppearanceFontFamily.system.rawValue
+    @AppStorage("appearanceThemePreset") private var appearanceThemePresetRaw: String = AppearanceThemePreset.emerald.rawValue
 
-    private var gw: Color { scheme == .dark ? .white : .black }
+    private var appearance: AppAppearance {
+        AppAppearance(
+            isDarkMode: isDarkMode,
+            textScale: AppearanceTextScale(rawValue: appearanceTextScaleRaw) ?? .medium,
+            fontFamily: AppearanceFontFamily(rawValue: appearanceFontFamilyRaw) ?? .system,
+            themePreset: AppearanceThemePreset(rawValue: appearanceThemePresetRaw) ?? .emerald
+        )
+    }
+
+    private var gw: Color { appearance.foregroundColor }
     private var snapshot: AnalyticsSnapshot { store.analyticsSnapshot }
 
     var body: some View {
@@ -22,23 +34,28 @@ struct AnalyticsWindowView: View {
                 summaryBand
                 trendSection
                 breakdownSection
+                workflowSection
                 limitPressureSection
                 reconciliationSection
+                diagnosticsSection
                 alertsSection
             }
             .padding(24)
         }
+        .tint(appearance.accentColor)
         .background(
             LinearGradient(
                 colors: [
                     scheme == .dark ? Color.black.opacity(0.92) : Color.white.opacity(0.94),
-                    scheme == .dark ? Color(red: 0.08, green: 0.09, blue: 0.13) : Color(red: 0.93, green: 0.95, blue: 0.98)
+                    scheme == .dark
+                        ? appearance.accentSecondaryColor.opacity(0.16)
+                        : appearance.accentSecondaryColor.opacity(0.12)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
-        .preferredColorScheme(isDarkMode ? .dark : .light)
+        .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 920, minHeight: 680)
     }
 
@@ -46,25 +63,37 @@ struct AnalyticsWindowView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Analitik", "Analytics"))
-                    .font(.system(size: 28, weight: .bold))
+                    .font(appearance.font(size: 28, weight: .bold))
                     .foregroundStyle(gw.opacity(0.92))
                 Text(L("Maliyet kontrolü ve operasyon görünürlüğü", "Cost control and operational visibility"))
-                    .font(.system(size: 13))
+                    .font(appearance.font(size: 13))
                     .foregroundStyle(gw.opacity(0.46))
 
                 HStack(spacing: 10) {
                     Text(L("Son başarılı fetch:", "Last successful fetch:"))
-                        .font(.system(size: 11, weight: .medium))
+                        .font(appearance.font(size: 11, weight: .medium))
                         .foregroundStyle(gw.opacity(0.34))
                     if let lastSuccessfulFetch = snapshot.dataQuality.lastSuccessfulFetch {
                         Text(lastSuccessfulFetch.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(appearance.monospacedFont(size: 11))
                             .foregroundStyle(gw.opacity(0.62))
                     } else {
                             Text(L("Henüz yok", "Not available yet"))
-                            .font(.system(size: 11))
+                            .font(appearance.font(size: 11))
                             .foregroundStyle(gw.opacity(0.3))
                     }
+                }
+
+                if let recommendation = store.powerUserRecommendation {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recommendation.title)
+                            .font(appearance.font(size: 11, weight: .semibold))
+                            .foregroundStyle(gw.opacity(0.76))
+                        Text(recommendation.detail)
+                            .font(appearance.font(size: 11))
+                            .foregroundStyle(gw.opacity(0.38))
+                    }
+                    .padding(.top, 2)
                 }
             }
 
@@ -86,13 +115,13 @@ struct AnalyticsWindowView: View {
                     store.refreshTokenUsage()
                 } label: {
                     Label(L("Yenile", "Refresh"), systemImage: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(appearance.font(size: 12, weight: .medium))
                         .foregroundStyle(gw.opacity(0.8))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(
                             Capsule()
-                                .fill(gw.opacity(0.08))
+                                .fill(appearance.subtleFill)
                         )
                 }
                 .buttonStyle(.plain)
@@ -105,7 +134,7 @@ struct AnalyticsWindowView: View {
             Image(systemName: confidence == .low ? "exclamationmark.triangle.fill" : "info.circle.fill")
                 .foregroundStyle(confidence == .low ? .orange : .yellow)
             Text(message)
-                .font(.system(size: 12))
+                .font(appearance.font(size: 12))
                 .foregroundStyle(gw.opacity(0.72))
             Spacer()
         }
@@ -147,18 +176,18 @@ struct AnalyticsWindowView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: icon)
-                    .foregroundStyle(gw.opacity(0.58))
+                    .foregroundStyle(appearance.accentColor.opacity(0.8))
                 Spacer()
                 Text(title)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(appearance.font(size: 10, weight: .medium))
                     .foregroundStyle(gw.opacity(0.34))
             }
             Text(primary)
-                .font(.system(size: 18, weight: .semibold))
+                .font(appearance.font(size: 18, weight: .semibold))
                 .foregroundStyle(gw.opacity(0.9))
                 .lineLimit(1)
             Text(secondary)
-                .font(.system(size: 11))
+                .font(appearance.font(size: 11))
                 .foregroundStyle(gw.opacity(0.38))
                 .lineLimit(1)
         }
@@ -174,14 +203,14 @@ struct AnalyticsWindowView: View {
                 points: snapshot.tokenTrend,
                 value: \.tokens,
                 formatter: formatTokens(_:),
-                tint: .cyan
+                tint: appearance.accentSecondaryColor
             )
             trendCard(
                 title: L("Maliyet trendi", "Cost trend"),
                 points: snapshot.costTrend,
                 value: \.cost,
                 formatter: CostCalculator.format(_:),
-                tint: .orange
+                tint: appearance.accentColor
             )
         }
     }
@@ -389,6 +418,89 @@ struct AnalyticsWindowView: View {
         }
     }
 
+    private var workflowSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: L("Workflow intelligence", "Workflow intelligence"),
+                subtitle: L("Yerel thread ve repo davranışı", "Local thread and repo behavior")
+            )
+
+            if snapshot.workflowSummary.totalActiveThreads == 0 {
+                emptyCardLabel
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(cardBackground)
+            } else {
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        summaryMiniPill(label: L("Thread", "Threads"), value: "\(snapshot.workflowSummary.totalActiveThreads)", tint: .blue)
+                        summaryMiniPill(label: L("Open edges", "Open edges"), value: "\(snapshot.workflowSummary.openSpawnEdges)", tint: .orange)
+                        summaryMiniPill(label: L("Tokens", "Tokens"), value: formatTokens(snapshot.workflowSummary.totalThreadTokens), tint: .green)
+                        Spacer()
+                    }
+
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("Top repos", "Top repos"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(gw.opacity(0.76))
+                            ForEach(snapshot.workflowSummary.repoInsights) { insight in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(insight.displayName)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(gw.opacity(0.8))
+                                        Text(insight.cwd)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(gw.opacity(0.28))
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text(formatTokens(insight.totalTokens))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(gw.opacity(0.42))
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(L("Recent threads", "Recent threads"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(gw.opacity(0.76))
+                            ForEach(snapshot.workflowSummary.recentThreads, id: \.threadId) { thread in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(thread.titlePreview)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(gw.opacity(0.8))
+                                        .lineLimit(2)
+                                    HStack(spacing: 8) {
+                                        diagnosticCapsule(thread.model.isEmpty ? "unknown-model" : thread.model)
+                                        if !thread.gitBranch.isEmpty {
+                                            diagnosticCapsule(thread.gitBranch)
+                                        }
+                                        Text(formatTokens(thread.tokensUsed))
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(gw.opacity(0.32))
+                                        Spacer()
+                                        Text(thread.updatedAt, style: .relative)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(gw.opacity(0.28))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+                    }
+                }
+            }
+        }
+    }
+
     private var reconciliationSection: some View {
         AnalyticsReconciliationSection(
             snapshot: snapshot,
@@ -428,6 +540,69 @@ struct AnalyticsWindowView: View {
                                         .foregroundStyle(alert.severity == .critical ? .red.opacity(0.85) : .orange.opacity(0.85))
                                 }
                                 Text(alert.message)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(gw.opacity(0.48))
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(cardBackground)
+                    }
+                }
+            }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: L("Diagnostics", "Diagnostics"),
+                subtitle: L("Birleşik operasyon zaman çizelgesi", "Unified operational timeline")
+            )
+
+            if snapshot.diagnosticsTimeline.isEmpty {
+                emptyCardLabel
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(cardBackground)
+            } else {
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        summaryMiniPill(label: L("Toplam", "Total"), value: "\(snapshot.diagnosticsSummary.totalCount)", tint: .blue)
+                        summaryMiniPill(label: L("Warning", "Warning"), value: "\(snapshot.diagnosticsSummary.warningCount)", tint: .orange)
+                        summaryMiniPill(label: L("Critical", "Critical"), value: "\(snapshot.diagnosticsSummary.criticalCount)", tint: .red)
+                        Spacer()
+                    }
+                    .padding(.bottom, 4)
+
+                    ForEach(snapshot.diagnosticsTimeline.prefix(12)) { event in
+                        HStack(alignment: .top, spacing: 12) {
+                            Circle()
+                                .fill(diagnosticsColor(event.severity).opacity(0.9))
+                                .frame(width: 10, height: 10)
+                                .padding(.top, 4)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(event.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(gw.opacity(0.82))
+                                    if let subject = event.subject, !subject.isEmpty {
+                                        Text(subject)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(gw.opacity(0.38))
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Text(event.timestamp, style: .relative)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(gw.opacity(0.3))
+                                }
+                                HStack(spacing: 8) {
+                                    diagnosticCapsule(event.kind.rawValue)
+                                    diagnosticCapsule(event.severity.rawValue)
+                                }
+                                Text(event.detail)
                                     .font(.system(size: 11))
                                     .foregroundStyle(gw.opacity(0.48))
                             }
@@ -523,6 +698,37 @@ struct AnalyticsWindowView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(gw.opacity(0.56))
         }
+    }
+
+    private func diagnosticsColor(_ severity: DiagnosticsEventSeverity) -> Color {
+        switch severity {
+        case .info: return .blue
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private func summaryMiniPill(label: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(gw.opacity(0.34))
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.85))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(gw.opacity(0.06)))
+    }
+
+    private func diagnosticCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(gw.opacity(0.4))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(gw.opacity(0.05)))
     }
 
     private func exportButton(title: String, type: UTType, content: @escaping () throws -> String) -> some View {

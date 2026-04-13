@@ -134,6 +134,30 @@ extension AppStore {
         }
     }
 
+    func moveProfile(_ draggedProfileId: UUID, to destinationIndex: Int) {
+        var config = profileManager.loadConfig()
+        guard let sourceIndex = config.profiles.firstIndex(where: { $0.id == draggedProfileId }) else { return }
+
+        let boundedDestination = max(0, min(destinationIndex, config.profiles.count))
+        let profile = config.profiles.remove(at: sourceIndex)
+        let adjustedDestination = sourceIndex < boundedDestination ? boundedDestination - 1 : boundedDestination
+
+        guard adjustedDestination != sourceIndex else {
+            config.profiles.insert(profile, at: sourceIndex)
+            return
+        }
+
+        config.profiles.insert(profile, at: adjustedDestination)
+        config.roundRobinIndex = min(config.roundRobinIndex, max(config.profiles.count - 1, 0))
+
+        profileManager.saveConfig(config)
+        profiles = config.profiles
+        if let activeProfileId = config.activeProfileId {
+            activeProfile = config.profiles.first(where: { $0.id == activeProfileId })
+        }
+        notifyProfileChanged()
+    }
+
     func showRenameDialog(for profile: Profile) {
         let alert = NSAlert()
         alert.messageText = Str.renameTitle

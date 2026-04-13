@@ -235,6 +235,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
     let sessions: [SessionSummary]
     let hourlyActivity: [HourlyActivity]
     let expensiveTurns: [ExpensiveTurn]
+    let workflowSummary: WorkflowSummary
     let limitPressure: [AnalyticsLimitPressure]
     let usageAuditSummary: AnalyticsUsageAuditSummary
     let usageAuditEntries: [AnalyticsUsageAuditEntry]
@@ -243,6 +244,8 @@ struct AnalyticsSnapshot: Equatable, Sendable {
     let reconciliationEntries: [ReconciliationEntry]
     let reconciliationPolicy: ReconciliationPolicy
     let alerts: [AnalyticsAlert]
+    let diagnosticsSummary: DiagnosticsSummary
+    let diagnosticsTimeline: [DiagnosticsEvent]
     let dataQuality: AnalyticsDataQuality
 
     init(
@@ -259,6 +262,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         sessions: [SessionSummary],
         hourlyActivity: [HourlyActivity],
         expensiveTurns: [ExpensiveTurn],
+        workflowSummary: WorkflowSummary = .empty,
         limitPressure: [AnalyticsLimitPressure],
         usageAuditSummary: AnalyticsUsageAuditSummary,
         usageAuditEntries: [AnalyticsUsageAuditEntry],
@@ -267,6 +271,8 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         reconciliationEntries: [ReconciliationEntry] = [],
         reconciliationPolicy: ReconciliationPolicy = ReconciliationPolicy(),
         alerts: [AnalyticsAlert],
+        diagnosticsSummary: DiagnosticsSummary = .empty,
+        diagnosticsTimeline: [DiagnosticsEvent] = [],
         dataQuality: AnalyticsDataQuality
     ) {
         self.generatedAt = generatedAt
@@ -282,6 +288,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         self.sessions = sessions
         self.hourlyActivity = hourlyActivity
         self.expensiveTurns = expensiveTurns
+        self.workflowSummary = workflowSummary
         self.limitPressure = limitPressure
         self.usageAuditSummary = usageAuditSummary
         self.usageAuditEntries = usageAuditEntries
@@ -290,6 +297,8 @@ struct AnalyticsSnapshot: Equatable, Sendable {
         self.reconciliationEntries = reconciliationEntries
         self.reconciliationPolicy = reconciliationPolicy
         self.alerts = alerts
+        self.diagnosticsSummary = diagnosticsSummary
+        self.diagnosticsTimeline = diagnosticsTimeline
         self.dataQuality = dataQuality
     }
 
@@ -316,6 +325,7 @@ struct AnalyticsSnapshot: Equatable, Sendable {
             sessions: [],
             hourlyActivity: [],
             expensiveTurns: [],
+            workflowSummary: .empty,
             limitPressure: [],
             usageAuditSummary: .empty,
             usageAuditEntries: [],
@@ -324,6 +334,8 @@ struct AnalyticsSnapshot: Equatable, Sendable {
             reconciliationEntries: [],
             reconciliationPolicy: ReconciliationPolicy(),
             alerts: [],
+            diagnosticsSummary: .empty,
+            diagnosticsTimeline: [],
             dataQuality: AnalyticsDataQuality(
                 confidence: .high,
                 staleProfileIds: [],

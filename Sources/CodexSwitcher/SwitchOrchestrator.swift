@@ -141,6 +141,35 @@ struct SwitchOrchestrator {
         )
     }
 
+    mutating func recordBlockedDecision(
+        targetProfileName: String,
+        reason: String,
+        detail: String,
+        now: Date = Date()
+    ) {
+        state = .idle
+        reliability.blockedDecisionCount += 1
+        appendTimelineEvent(
+            stage: .blocked,
+            timestamp: now,
+            targetProfileName: targetProfileName,
+            reason: reason,
+            detail: detail
+        )
+    }
+
+    mutating func recordHaltedDecision(reason: String, detail: String, now: Date = Date()) {
+        state = .idle
+        reliability.haltedDecisionCount += 1
+        appendTimelineEvent(
+            stage: .halted,
+            timestamp: now,
+            targetProfileName: "Automation",
+            reason: reason,
+            detail: detail
+        )
+    }
+
     private mutating func finalizeFallbackRestart(
         targetProfileName: String,
         detail: String,
