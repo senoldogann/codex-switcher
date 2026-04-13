@@ -591,6 +591,8 @@ final class AppStore: ObservableObject {
             )
         )
 
+        scheduleCodexWindowRecovery()
+
         guard let bundleURL else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             guard !self.isBundledCodexAppServerRunning(bundleURL: bundleURL) else { return }
@@ -614,6 +616,57 @@ final class AppStore: ObservableObject {
             executableURL: URL(fileURLWithPath: "/usr/bin/pkill"),
             arguments: ["-f", "\(executablePath) app-server"]
         )
+    }
+
+    private func scheduleCodexWindowRecovery() {
+        let delays: [TimeInterval] = [0.8, 1.6, 2.8]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                _ = self.tryClickCodexReloadButton()
+            }
+        }
+    }
+
+    private func tryClickCodexReloadButton() -> Bool {
+        let script = """
+        tell application "System Events"
+            if not (exists process "Codex") then
+                return "missing"
+            end if
+            tell process "Codex"
+                repeat with buttonName in {"Reload", "Yeniden Yükle"}
+                    try
+                        if exists (button (buttonName as text) of window 1) then
+                            click button (buttonName as text) of window 1
+                            return "clicked"
+                        end if
+                    end try
+                end repeat
+            end tell
+        end tell
+        return "missing"
+        """
+
+        return runAppleScript(source: script) == "clicked"
+    }
+
+    private func runAppleScript(source: String) -> String {
+        let process = Process()
+        let outputPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        } catch {
+            return ""
+        }
     }
 
     private func isBundledCodexAppServerRunning(bundleURL: URL?) -> Bool {
