@@ -28,11 +28,13 @@ final class SessionUsageTracker {
     func turnsSince(_ date: Date) -> Int {
         let calendar = Calendar.current
         let now = Date()
+        let startDay = calendar.startOfDay(for: date)
+        let endDay = calendar.startOfDay(for: now)
         var count = 0
 
-        // Başlangıç tarihi ile bugün arasındaki günleri tara
-        var current = date
-        while current <= now {
+        // Scan each session day between the requested date and today.
+        var current = startDay
+        while current <= endDay {
             let year  = calendar.component(.year,  from: current)
             let month = calendar.component(.month, from: current)
             let day   = calendar.component(.day,   from: current)

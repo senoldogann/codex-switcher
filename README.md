@@ -155,6 +155,12 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.2.3
+- **Background Codex refresh** — Account switching now refreshes Codex's bundled app-server in the background so the window stays open while the new account is loaded
+- **Limit-stuck recovery** — Switched accounts no longer depend on a full visible Codex relaunch to escape stale `you hit limit` local sessions
+- **Version metadata sync** — Bundle version now matches the published `v2.2.3` release again
+- **Midnight session counting fix** — Session usage tracking now scans day boundaries correctly, fixing the release-blocking cache regression test around midnight
+
 ### v2.2.2
 - **Launch crash fix** — Moved the notification permission request out of `AppStore` initialization so the menu bar app no longer aborts during early startup on some macOS setups
 - **Safer permission bootstrap** — Notification authorization is now requested from a deferred, one-shot launch bootstrap instead of eager singleton construction

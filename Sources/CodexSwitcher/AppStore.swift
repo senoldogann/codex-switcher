@@ -396,7 +396,19 @@ final class AppStore: ObservableObject {
         notifyProfileChanged()
         sendNotification(title: L("Hesap değiştirildi", "Account switched"), body: "\(candidate.displayName) — \(reason)")
         Task { await fetchAllRateLimits() }
-        attemptSeamlessSwitch(for: candidate)
+        if isCodexRunning() {
+            switchOrchestrator.recordImmediateRestart(
+                targetProfileName: candidate.displayName,
+                detail: L(
+                    "Desktop Codex arka planda yeni hesabı yüklemesi için yenileniyor.",
+                    "Desktop Codex is refreshing in the background so the new account can be loaded."
+                )
+            )
+            syncSwitchOrchestrationState()
+            restartAIIfRunning(for: candidate)
+        } else {
+            attemptSeamlessSwitch(for: candidate)
+        }
     }
 
     // MARK: - AI Restart
@@ -411,16 +423,65 @@ final class AppStore: ObservableObject {
         }) else { return }
 
         let bundleURL = codexApp.bundleURL
-        codexApp.forceTerminate()
+        terminateBundledCodexAppServerProcesses(bundleURL: bundleURL)
 
         sendNotification(
             title: L("Hesap değiştirildi", "Account Switched"),
-            body: L("Codex yeniden başlatılıyor. Yeni hesap aktif.", "Codex is restarting. New account is now active.")
+            body: L(
+                "Codex arka planda yeni hesabı yüklüyor. Pencere açık kalacak.",
+                "Codex is reloading the new account in the background. The window will stay open."
+            )
         )
 
-        guard let url = bundleURL else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
+        guard let bundleURL else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            guard !self.isBundledCodexAppServerRunning(bundleURL: bundleURL) else { return }
+            self.sendNotification(
+                title: L("Codex yenilemesi tamamlanmadı", "Codex refresh did not complete"),
+                body: L(
+                    "Arka plan oturumu otomatik bağlanmadı. Gerekirse Codex'i elle yeniden aç.",
+                    "The background session did not reconnect automatically. Reopen Codex manually if needed."
+                )
+            )
+        }
+    }
+
+    private func terminateBundledCodexAppServerProcesses(bundleURL: URL?) {
+        guard let bundleURL else { return }
+        let executablePath = bundleURL
+            .appendingPathComponent("Contents/Resources/codex")
+            .path
+
+        runDetachedTool(
+            executableURL: URL(fileURLWithPath: "/usr/bin/pkill"),
+            arguments: ["-f", "\(executablePath) app-server"]
+        )
+    }
+
+    private func isBundledCodexAppServerRunning(bundleURL: URL?) -> Bool {
+        guard let bundleURL else { return false }
+        let executablePath = bundleURL
+            .appendingPathComponent("Contents/Resources/codex")
+            .path
+
+        return runDetachedTool(
+            executableURL: URL(fileURLWithPath: "/usr/bin/pgrep"),
+            arguments: ["-f", "\(executablePath) app-server"]
+        ) == 0
+    }
+
+    @discardableResult
+    private func runDetachedTool(executableURL: URL, arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch {
+            return -1
         }
     }
 
