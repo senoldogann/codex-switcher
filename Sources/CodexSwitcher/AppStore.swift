@@ -579,120 +579,46 @@ final class AppStore: ObservableObject {
         guard let codexApp = NSWorkspace.shared.runningApplications.first(where: {
             $0.localizedName == "Codex" && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }) else { return }
-
-        let bundleURL = codexApp.bundleURL
-        terminateBundledCodexAppServerProcesses(bundleURL: bundleURL)
-
-        sendNotification(
-            title: L("Hesap değiştirildi", "Account Switched"),
-            body: L(
-                "Codex arka planda yeni hesabı yüklüyor. Pencere açık kalacak.",
-                "Codex is reloading the new account in the background. The window will stay open."
-            )
-        )
-
-        scheduleCodexWindowRecovery()
-
-        guard let bundleURL else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            guard !self.isBundledCodexAppServerRunning(bundleURL: bundleURL) else { return }
-            self.sendNotification(
-                title: L("Codex yenilemesi tamamlanmadı", "Codex refresh did not complete"),
+        guard !isSessionActive else {
+            sendNotification(
+                title: L("Hesap değiştirildi", "Account switched"),
                 body: L(
-                    "Arka plan oturumu otomatik bağlanmadı. Gerekirse Codex'i elle yeniden aç.",
-                    "The background session did not reconnect automatically. Reopen Codex manually if needed."
+                    "Codex'te aktif bir session olduğu için otomatik yeniden başlatma yapılmadı.",
+                    "Codex was not restarted automatically because an active session is still running."
                 )
             )
+            return
         }
-    }
 
-    private func terminateBundledCodexAppServerProcesses(bundleURL: URL?) {
-        guard let bundleURL else { return }
-        let executablePath = bundleURL
-            .appendingPathComponent("Contents/Resources/codex")
-            .path
+        guard let bundleURL = codexApp.bundleURL else { return }
 
-        runDetachedTool(
-            executableURL: URL(fileURLWithPath: "/usr/bin/pkill"),
-            arguments: ["-f", "\(executablePath) app-server"]
+        sendNotification(
+            title: L("Hesap değiştirildi", "Account switched"),
+            body: L(
+                "Yeni hesabın yüklenmesi için Codex yeniden başlatılıyor.",
+                "Codex is restarting so the new account can be loaded."
+            )
         )
-    }
 
-    private func scheduleCodexWindowRecovery() {
-        let delays: [TimeInterval] = [0.8, 1.6, 2.8]
-        for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                _ = self.tryClickCodexReloadButton()
+        codexApp.terminate()
+        let relaunchURL = bundleURL
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: relaunchURL, configuration: configuration) { _, error in
+                guard error == nil else {
+                    Task { @MainActor in
+                        self.sendNotification(
+                            title: L("Codex yeniden açılamadı", "Codex could not be reopened"),
+                            body: L(
+                                "Uygulama yeniden başlatılamadı. Lütfen Codex'i elle aç.",
+                                "The app could not be restarted. Please reopen Codex manually."
+                            )
+                        )
+                    }
+                    return
+                }
             }
-        }
-    }
-
-    private func tryClickCodexReloadButton() -> Bool {
-        let script = """
-        tell application "System Events"
-            if not (exists process "Codex") then
-                return "missing"
-            end if
-            tell process "Codex"
-                repeat with buttonName in {"Reload", "Yeniden Yükle"}
-                    try
-                        if exists (button (buttonName as text) of window 1) then
-                            click button (buttonName as text) of window 1
-                            return "clicked"
-                        end if
-                    end try
-                end repeat
-            end tell
-        end tell
-        return "missing"
-        """
-
-        return runAppleScript(source: script) == "clicked"
-    }
-
-    private func runAppleScript(source: String) -> String {
-        let process = Process()
-        let outputPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        } catch {
-            return ""
-        }
-    }
-
-    private func isBundledCodexAppServerRunning(bundleURL: URL?) -> Bool {
-        guard let bundleURL else { return false }
-        let executablePath = bundleURL
-            .appendingPathComponent("Contents/Resources/codex")
-            .path
-
-        return runDetachedTool(
-            executableURL: URL(fileURLWithPath: "/usr/bin/pgrep"),
-            arguments: ["-f", "\(executablePath) app-server"]
-        ) == 0
-    }
-
-    @discardableResult
-    private func runDetachedTool(executableURL: URL, arguments: [String]) -> Int32 {
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus
-        } catch {
-            return -1
         }
     }
 

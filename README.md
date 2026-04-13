@@ -155,6 +155,11 @@ Token attribution reads `input_tokens`, `cached_input_tokens`, and `output_token
 
 ## Changelog
 
+### v2.2.6
+- **Safe Codex relaunch** — Account switching no longer kills Codex's bundled background runtime with `SIGTERM`, which was triggering Codex's crash screen
+- **No-session restart rule** — If Codex is open and no session is currently active, CodexSwitcher now closes and reopens the full Codex app automatically so the new account is applied cleanly
+- **Active-session protection** — If Codex still has active session activity, CodexSwitcher skips the automatic relaunch instead of interrupting work
+
 ### v2.2.5
 - **Crash-screen recovery** — If Codex shows its `An error has occurred` page after a background account refresh, CodexSwitcher now auto-clicks `Reload` so the window recovers without manual intervention
 - **UI-stays-open hotfix** — The background cutover path now includes automatic window recovery instead of leaving the user on the SIGTERM crash page
